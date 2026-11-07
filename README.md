@@ -162,7 +162,8 @@ Every command takes `--help`. A board can be named by its name or id.
 Commands can run while the board is running. The page picks up what they do.
 
 Exit codes: `0` it worked, `1` it failed with a message saying why, `2` the command itself was
-wrong, `130` you pressed Ctrl+C.
+wrong, `130` you pressed Ctrl+C during a command. Stopping the board itself with Ctrl+C is normal and
+exits with `0`.
 
 ## When something goes wrong
 

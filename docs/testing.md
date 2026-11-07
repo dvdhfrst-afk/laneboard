@@ -101,5 +101,8 @@ also holds the docs and tests.
   synced by something like Dropbox may also replace the file behind Laneboard's back. It should notice, but that
   wasn't tried.
 - **Running for days.** The longest single run was minutes.
+- **Ctrl+C in a Windows console.** On Linux, a real interrupt stopped the board with exit code 0 and a waiting `import`
+  with 130, and left the file readable. No automated test covers this.
+- **The `ssh` tunnel** shown in the README.
 - **Windows versions other than 11, and Python 3.10 and 3.13.**
 - **An outside security review.** See [SECURITY.md](../SECURITY.md) for what it's meant to defend against.
