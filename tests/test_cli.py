@@ -119,17 +119,17 @@ class WorkflowTest(CliCase):
         out, _ = self.run_cli("import", target)
         self.assertIn(f"Imported {name} with 5 cards", out)
         out, _ = self.run_cli("export", "--all")
-        self.assertEqual(len(json.loads(out)["boards"]), 3)
+        self.assertEqual(len(json.loads(out)["boards"]), 2)
 
     def test_import_from_standard_input_and_whole_files(self):
         board = json.dumps({"name": "Piped", "cards": [{"title": "One"}]}).encode()
         out, _ = self.run_cli("import", "-", stdin=board)
-        self.assertIn("Imported Piped with 1 cards", out)
+        self.assertIn("Imported Piped with 1 card as", out)
         whole = os.path.join(self.tmp.name, "whole.json")
         with open(whole, "w", encoding="utf-8") as f:
             f.write(self.run_cli("export", "--all")[0])
         out, _ = self.run_cli("import", whole)
-        self.assertEqual(out.count("Imported"), 2)
+        self.assertEqual(out.count("Imported"), 1)
 
     def test_samples(self):
         out, _ = self.run_cli("sample")
@@ -351,6 +351,20 @@ class InProcessTest(CliCase):
             self.assertEqual(json.loads(buffer.getvalue())[0]["name"], "My board")
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(cli.main(["cards", "Nope"]), 1)
+
+
+class NewFile(CliCase):
+    def test_adding_first_leaves_no_empty_starter_board(self):
+        self.run_cli("sample", "garden")
+        with open(self.data, encoding="utf-8") as f:
+            self.assertEqual([b["name"] for b in json.load(f)["boards"]], ["Garden project"])
+
+    def test_a_failed_import_into_nothing_writes_nothing(self):
+        bad = os.path.join(self.tmp.name, "bad.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("{ nope")
+        self.run_cli("import", bad, code=1)
+        self.assertFalse(os.path.exists(self.data))
 
 
 if __name__ == "__main__":

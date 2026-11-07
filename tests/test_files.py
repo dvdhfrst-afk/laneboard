@@ -1,7 +1,6 @@
 """What happens to the boards file when things go wrong: bad contents, failed saves, kills, old versions."""
 import json
 import os
-import shutil
 import stat
 import subprocess
 import sys

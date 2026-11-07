@@ -10,6 +10,7 @@
 </head>
 <body>
 <div class="app">
+  <div class="banner" id="banner" role="alert" hidden></div>
   <header class="bar">
     <div class="bar-left">
       <h1 id="board-name">Laneboard</h1>
@@ -20,30 +21,41 @@
       <button type="button" class="primary" id="new-card" disabled>New card</button>
       <button type="button" id="board-settings" disabled>Board settings</button>
       <button type="button" id="new-board">New board</button>
+      <details class="menu" id="menu">
+        <summary>More</summary>
+        <div class="menu-items" id="menu-items" role="menu"></div>
+      </details>
     </div>
   </header>
   <p class="desc" id="board-desc" hidden></p>
+  <div class="welcome" id="welcome" hidden></div>
 
   <div class="tools" id="tools" hidden>
     <label class="sr" for="search">Search cards</label>
     <input type="search" id="search" placeholder="Search cards (press / )" autocomplete="off">
-    <div class="filters" id="filters" role="group" aria-label="Filter by group"></div>
+    <span class="search-count" id="search-count"></span>
+    <div class="filters" id="filters" role="group" aria-label="Filter cards"></div>
   </div>
 
   <div class="board-wrap">
-    <main class="board" id="board" aria-live="polite"></main>
+    <main class="board" id="board"></main>
   </div>
 
   <section class="groups" id="groups" hidden>
     <h2 id="groups-title">Groups</h2>
     <div class="scroll"><table id="groups-table"></table></div>
   </section>
+
+  <footer class="foot"><span id="version">Laneboard</span>. Your boards stay on this computer. Press ? for keyboard shortcuts.</footer>
 </div>
+
+<input type="file" id="import-file" accept=".json,application/json" hidden>
 
 <dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
   <div class="sheet-inner" id="sheet-body"></div>
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>
+<div class="sr" id="live" aria-live="polite"></div>
 </body>
 </html>

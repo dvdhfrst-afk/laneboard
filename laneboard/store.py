@@ -80,24 +80,27 @@ def restore_backup(path, name):
 
 
 class Store:
-    def __init__(self, path, create=True):
+    def __init__(self, path, create=True, starter=True):
+        """With starter=False a new file begins empty and isn't written until something is saved."""
         self.path = resolve_path(path)
         self._lock = threading.RLock()
         self._stamp = None
         self._upgraded_from = None
         self.created = False
-        self.data = self._open(create)
+        self.data = self._open(create, starter)
         storage.remove_stale_temp_files(self.path)
 
     # ---- file handling -------------------------------------------------------------------------
 
-    def _open(self, create):
+    def _open(self, create, starter):
         if os.path.isdir(self.path):
             raise Unavailable(f"{self.path} is a folder. Give the name of a boards file, like {os.path.join(self.path, 'boards.json')}.")
         if os.path.exists(self.path):
             return self._read()
         if not create:
             raise NotFound(f"There's no boards file at {self.path} yet.")
+        if not starter:
+            return {"version": SCHEMA_VERSION, "boards": []}
         try:
             with storage.FileLock(self.path + ".lock"):
                 if os.path.exists(self.path):  # another program got here first

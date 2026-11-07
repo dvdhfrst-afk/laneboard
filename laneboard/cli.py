@@ -208,10 +208,14 @@ def cmd_archive(args):
     print(f"{'Restored' if args.restore else 'Archived'} {args.key}.")
 
 
+def _cards(n):
+    return f"{n} card{'' if n == 1 else 's'}"
+
+
 def cmd_import(args):
-    store = Store(args.data)
+    store = Store(args.data, starter=False)  # the first thing in a new file is what's being added
     for board in store.import_data(read_json(args.file)):
-        print(f"Imported {board['name']} with {len(board['cards'])} cards as {board['id']}.")
+        print(f"Imported {board['name']} with {_cards(len(board['cards']))} as {board['id']}.")
 
 
 def cmd_export(args):
@@ -226,9 +230,9 @@ def cmd_sample(args):
         for s in samples.list_samples():
             print(f"{s['name']:<20} {s['title']} ({s['cards']} cards). {s['description']}")
         return
-    store = Store(args.data)
+    store = Store(args.data, starter=False)
     board = store.import_board(samples.load(args.name))
-    print(f"Added {board['name']} with {len(board['cards'])} cards as {board['id']}.")
+    print(f"Added {board['name']} with {_cards(len(board['cards']))} as {board['id']}.")
 
 
 def _describe(item):
