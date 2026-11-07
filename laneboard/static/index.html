@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Laneboard</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="bar-left">
+      <h1 id="board-name">Laneboard</h1>
+      <label class="sr" for="board-pick">Switch board</label>
+      <select id="board-pick" hidden></select>
+    </div>
+    <div class="bar-actions">
+      <button type="button" class="primary" id="new-card" disabled>New card</button>
+      <button type="button" id="board-settings" disabled>Board settings</button>
+      <button type="button" id="new-board">New board</button>
+    </div>
+  </header>
+  <p class="desc" id="board-desc" hidden></p>
+
+  <div class="tools" id="tools" hidden>
+    <label class="sr" for="search">Search cards</label>
+    <input type="search" id="search" placeholder="Search cards (press / )" autocomplete="off">
+    <div class="filters" id="filters" role="group" aria-label="Filter by group"></div>
+  </div>
+
+  <div class="board-wrap">
+    <main class="board" id="board" aria-live="polite"></main>
+  </div>
+
+  <section class="groups" id="groups" hidden>
+    <h2 id="groups-title">Groups</h2>
+    <div class="scroll"><table id="groups-table"></table></div>
+  </section>
+</div>
+
+<dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
+  <div class="sheet-inner" id="sheet-body"></div>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

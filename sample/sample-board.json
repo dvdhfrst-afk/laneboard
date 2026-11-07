@@ -1,0 +1,40 @@
+{
+ "name": "Garden project",
+ "description": "A made-up board that shows what a card can hold. Import it with: python -m laneboard import sample/sample-board.json",
+ "prefix": "T",
+ "groupLabel": "Area",
+ "columns": [
+  {"name": "Backlog", "limit": null},
+  {"name": "Ready", "limit": null},
+  {"name": "In progress", "limit": 1},
+  {"name": "Review", "limit": null},
+  {"name": "Done", "limit": null}
+ ],
+ "groups": [
+  {"name": "Vegetable beds", "prefix": "BED", "color": "green", "link": "https://example.com/beds",
+   "details": [{"label": "Size", "value": "Two raised beds"}, {"label": "Sun", "value": "Full sun after 10am"}]},
+  {"name": "Watering", "prefix": "H2O", "color": "blue", "link": "",
+   "details": [{"label": "Size", "value": "One timer, four zones"}, {"label": "Sun", "value": "n/a"}]}
+ ],
+ "cards": [
+  {"key": "BED-1", "title": "Build the second raised bed", "group": "vegetable-beds", "column": "in-progress", "rank": 1,
+   "summary": "Same size as the first bed so the cover fits both.",
+   "fields": [{"label": "Size", "value": "Half a day"}, {"label": "Cost", "value": "About 80"}],
+   "sections": [
+    {"label": "Steps", "body": "Cut the boards to `120 cm` and `90 cm`\nScrew the corners\nLine the bottom with mesh\nFill with the soil mix"},
+    {"label": "Done when", "body": "The bed is level and full of soil."}
+   ],
+   "notes": "Boards are in the shed."},
+  {"key": "BED-2", "title": "Plant the tomato seedlings", "group": "vegetable-beds", "column": "ready", "rank": 2,
+   "fields": [{"label": "Size", "value": "1 hour"}],
+   "blocked": ""},
+  {"key": "H2O-1", "title": "Add a drip line to the new bed", "group": "watering", "column": "backlog", "rank": 3,
+   "summary": "Run a branch from zone 2.",
+   "fields": [{"label": "Size", "value": "2 hours"}],
+   "blocked": "Waiting for the second bed (BED-1)."},
+  {"key": "H2O-2", "title": "Set the timer for summer", "group": "watering", "column": "done", "rank": 4,
+   "fields": [{"label": "Size", "value": "15 minutes"}],
+   "sections": [{"label": "Schedule", "body": "Zone 1: `06:00` for 10 minutes\nZone 2: `06:15` for 15 minutes"}]},
+  {"key": "T-1", "title": "Order compost", "column": "backlog", "rank": 5}
+ ]
+}

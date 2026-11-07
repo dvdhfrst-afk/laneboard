@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+# Board data lives outside the repo (see README); keep stray copies out too.
+boards.json
+boards.json.bak
+.boards-*.tmp

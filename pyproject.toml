@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "laneboard"
+version = "0.1.0"
+description = "A local kanban board that keeps everything in one JSON file."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+laneboard = "laneboard.__main__:main"
+
+[tool.setuptools]
+packages = ["laneboard"]
+
+[tool.setuptools.package-data]
+laneboard = ["static/*"]
