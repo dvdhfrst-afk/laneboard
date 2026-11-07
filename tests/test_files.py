@@ -1,6 +1,7 @@
 """What happens to the boards file when things go wrong: bad contents, failed saves, kills, old versions."""
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -353,6 +354,20 @@ class FailedSaveTest(FileCase):
             self.store.create_card(self.board, {"title": "Two"})
         self.assertEqual(len(json.loads(self.read())["boards"][0]["cards"]), 2)
 
+    def test_a_moment_of_lock_during_the_backup_copy_is_waited_out(self):
+        real = shutil.copyfile
+        failures = [PermissionError(13, "in use"), PermissionError(13, "in use")]
+
+        def flaky(src, dst):
+            if failures:
+                raise failures.pop()
+            return real(src, dst)
+
+        with mock.patch("os.name", "nt"), mock.patch("shutil.copyfile", flaky), mock.patch("laneboard.storage._sync_folder"):
+            self.store.create_card(self.board, {"title": "Two"})
+        self.assertEqual(len(json.loads(self.read())["boards"][0]["cards"]), 2)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write to anything")
     def test_read_only_file(self):
         os.chmod(self.path, stat.S_IREAD)
         with self.assertRaises(Unavailable) as caught:

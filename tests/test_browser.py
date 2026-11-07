@@ -9,6 +9,7 @@ tests need Playwright and skip without it:
 
 import json
 import os
+import random
 import socket
 import stat
 import subprocess
@@ -257,6 +258,51 @@ class Moving(BrowserCase):
         self.until(page, "!document.querySelector('#sheet').open")
         self.until(page, "document.activeElement.classList.contains('card')")
         self.assertTrue(opened.endswith(page.evaluate("document.activeElement.dataset.key")))
+
+    def test_fast_moves_on_a_slow_disk_all_count(self):
+        self.app.seed(sample_board())
+        self.app.start()
+        self.context.add_init_script("""
+          const real = window.fetch;
+          window.fetch = async (url, opts) => {
+            if (opts && opts.method === "PATCH") await new Promise((r) => setTimeout(r, 250));
+            return real(url, opts);
+          };""")
+        page = self.open_page()
+        page.focus('.card[data-key="T-1"]')
+        for _ in range(3):
+            page.keyboard.press("Shift+ArrowDown")
+        order = ["T-2", "T-3", "T-4", "T-1", "T-5", "T-6"]
+        self.assertEqual(self.column_keys(page, "backlog"), order, "the screen shows the moves at once")
+        self.until(page, "document.querySelector('#board .card') && true")
+        # While the answers arrive one by one, the screen never goes back.
+        for _ in range(20):
+            self.assertEqual(self.column_keys(page, "backlog"), order)
+            page.wait_for_timeout(50)
+        ranks = sorted((c["rank"], c["key"]) for c in self.app.board()["cards"])
+        self.assertEqual([k for _, k in ranks], order)
+        self.assertEqual(page.evaluate("document.activeElement.dataset.key"), "T-1")
+
+    def test_a_change_queued_before_switching_boards_reaches_its_own_board(self):
+        self.app.seed(sample_board("First"), sample_board("Second"))
+        self.app.start()
+        self.context.add_init_script("""
+          const real = window.fetch;
+          window.fetch = async (url, opts) => {
+            if (opts && opts.method === "PATCH") await new Promise((r) => setTimeout(r, 300));
+            return real(url, opts);
+          };""")
+        page = self.open_page()
+        first, second = self.app.load()["boards"]
+        self.assertEqual(page.locator("#board-name").inner_text(), "First")
+        page.focus('.card[data-key="T-1"]')
+        page.keyboard.press("Shift+ArrowRight")
+        page.keyboard.press("Shift+ArrowRight")
+        page.select_option("#board-pick", second["id"])
+        self.until(page, "document.querySelector('#board-name').textContent === 'Second'")
+        self.wait_until(lambda: self.app.card("T-1", 0)["column"] == "in-progress", "the moves to reach the first board")
+        self.assertEqual(self.app.card("T-1", 1)["column"], "backlog")
+        self.assertEqual(self.column_keys(page, "backlog")[0], "T-1", "the second board's own card stays put")
 
     def test_one_tab_stop_for_the_cards(self):
         page = self.start(sample_board())
@@ -764,6 +810,180 @@ class Sizes(BrowserCase):
         self.wait_until(lambda: self.app.card("T-3")["column"] == "done", "the move to save")
         self.assertEqual(self.column_keys(page, "backlog")[:3], [before[0], before[1], before[3]])
         self.assertEqual(page.locator('[data-col="backlog"] .count').inner_text(), "1199")
+
+
+class LongSession(BrowserCase):
+    """Random real use, checked at the end against a separate record of what should have happened."""
+
+    STEPS = int(os.environ.get("LANEBOARD_SESSION_STEPS", "120"))
+    CARDS = int(os.environ.get("LANEBOARD_SESSION_CARDS", "1000"))
+
+    def close_sheet(self, page):
+        page.click("#sheet >> text=Close")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+    def settle(self, page):
+        """Wait for everything sent to have been answered, as someone reading the screen would."""
+        self.until(page, "pending === 0")
+
+    def test_session(self):
+        rng = random.Random(20261107)
+        board = sample_board("Long session", cards=self.CARDS)
+        columns = ["backlog", "ready", "in-progress", "review", "done"]
+        board["cards"] = [{"key": f"T-{i}", "title": f"Card {i}", "column": columns[i % 5], "rank": i, "group": "home" if i % 3 == 0 else None}
+                          for i in range(1, self.CARDS + 1)]
+        page = self.start(board)
+        expected = {c["key"]: {"title": c["title"], "column": c["column"], "archived": False, "notes": "", "checks": 0} for c in board["cards"]}
+        counts = {}
+
+        def live():
+            return [k for k, c in expected.items() if not c["archived"]]
+
+        def open_card(key):
+            page.click(f'.card[data-key="{key}"]')
+            page.wait_for_selector("#card-notes")
+
+        def notes():
+            key = rng.choice(live())
+            open_card(key)
+            text = f"Note {rng.randrange(10 ** 6)} é 日本語"
+            page.fill("#card-notes", text)
+            expected[key]["notes"] = text
+            self.close_sheet(page)  # closing saves straight away
+
+        def move_by_keyboard():
+            key = rng.choice(live())
+            page.focus(f'.card[data-key="{key}"]')
+            at = columns.index(expected[key]["column"])
+            step = rng.choice([-1, 1])
+            if 0 <= at + step < 5:
+                page.keyboard.press("Shift+ArrowRight" if step > 0 else "Shift+ArrowLeft")
+                expected[key]["column"] = columns[at + step]
+
+        def move_by_drag():
+            key = rng.choice(live())
+            target = rng.choice(columns)
+            page.drag_and_drop(f'.card[data-key="{key}"]', f'[data-col="{target}"] .col-head')
+            expected[key]["column"] = target
+
+        def move_in_card():
+            key = rng.choice(live())
+            target = rng.choice(columns)
+            open_card(key)
+            page.select_option("#card-column", target)
+            expected[key]["column"] = target
+            self.close_sheet(page)
+
+        def rename():
+            key = rng.choice(live())
+            open_card(key)
+            page.click("#sheet >> text=Edit")
+            title = f"Renamed {rng.randrange(10 ** 6)} <b>not bold</b>"
+            page.fill("dialog[open] input", title)
+            page.click("dialog[open] button[type=submit]")
+            page.wait_for_selector("#card-notes")
+            expected[key]["title"] = title
+            self.close_sheet(page)
+
+        def add():
+            page.click("#new-card")
+            title = f"Added {rng.randrange(10 ** 6)}"
+            page.fill("dialog[open] input", title)
+            page.click("dialog[open] button[type=submit]")
+            page.wait_for_selector("#card-notes")
+            key = page.locator("#sheet .key").inner_text()
+            expected[key] = {"title": title, "column": "backlog", "archived": False, "notes": "", "checks": 0}
+            self.close_sheet(page)
+
+        def duplicate():
+            key = rng.choice(live())
+            original = expected[key]
+            open_card(key)
+            page.click("#sheet >> text=Duplicate")
+            self.until(page, f"document.querySelector('#sheet .key').textContent !== '{key}'")
+            new = page.locator("#sheet .key").inner_text()
+            expected[new] = {"title": f"Copy of {original['title']}"[:200], "column": original["column"], "archived": False, "notes": "", "checks": 0}
+            self.close_sheet(page)
+
+        def archive():
+            key = rng.choice(live())
+            open_card(key)
+            page.click("#sheet >> text=Archive")
+            self.until(page, "!document.querySelector('#sheet').open")
+            expected[key]["archived"] = True
+
+        def restore():
+            gone = [k for k, c in expected.items() if c["archived"]]
+            if not gone:
+                return
+            key = rng.choice(gone)
+            page.click("#menu summary")
+            page.click("#menu >> text=Archived cards")
+            search = page.locator("dialog[open] input[type=search]")
+            search.fill(key)
+            row = page.locator(".archive-row", has=page.locator(f'a[href$="/{key}"]'))
+            row.locator("text=Restore").click()
+            self.until(page, f"!document.querySelector('.archive-row a[href$=\"/{key}\"]')")
+            expected[key]["archived"] = False
+            self.close_sheet(page)
+
+        def delete():
+            key = rng.choice(live())
+            open_card(key)
+            page.click("#sheet >> text=Edit")
+            page.click("text=Delete card")
+            page.click(".confirm button.danger")
+            self.until(page, "!document.querySelector('#sheet').open")
+            del expected[key]
+
+        def tick():
+            key = rng.choice(live())
+            open_card(key)
+            box = page.locator(".checks input").nth(rng.randrange(2))
+            before = box.is_checked()
+            box.click()
+            expected[key]["checks"] += -1 if before else 1
+            self.close_sheet(page)
+
+        def search():
+            page.fill("#search", rng.choice(["card 7", "renamed", "日本語", "nothing matches this"]))
+            page.wait_for_timeout(180)
+            page.fill("#search", "")
+            page.wait_for_timeout(180)
+
+        def filters():
+            page.click("#filters >> text=Home")
+            page.click("#filters >> text=Show all")
+
+        def collapse():
+            target = rng.choice(columns)
+            page.click(f'[data-col="{target}"] .collapse')
+            page.click(f'[data-col="{target}"] .collapse')
+
+        actions = [notes, notes, move_by_keyboard, move_by_keyboard, move_by_drag, move_in_card, rename, add, duplicate, archive, restore,
+                   delete, tick, tick, search, filters, collapse]
+        for _ in range(self.STEPS):
+            action = rng.choice(actions)
+            counts[action.__name__] = counts.get(action.__name__, 0) + 1
+            self.settle(page)
+            action()
+
+        page.wait_for_timeout(600)  # the last saves land
+        saved = {c["key"]: c for c in self.app.board()["cards"]}
+        self.assertEqual(sorted(saved), sorted(expected), "the same cards exist")
+        for key, want in expected.items():
+            got = saved[key]
+            self.assertEqual((got["title"], got["column"], bool(got["archived"]), got["notes"], len(got["checks"])),
+                             (want["title"], want["column"], want["archived"], want["notes"], want["checks"]), key)
+        page.reload()
+        page.wait_for_selector(".card")
+        for column in columns:
+            want = sum(1 for c in expected.values() if c["column"] == column and not c["archived"])
+            self.assertEqual(page.locator(f'[data-col="{column}"] .count').inner_text().split(" ")[0], str(want), column)
+        report = os.environ.get("LANEBOARD_SESSION_REPORT")
+        if report:
+            with open(report, "w", encoding="utf-8") as f:
+                json.dump({"steps": self.STEPS, "cards": len(expected), "actions": counts}, f, indent=1, sort_keys=True)
 
 
 if __name__ == "__main__":

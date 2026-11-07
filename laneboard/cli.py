@@ -143,15 +143,19 @@ def write_json(payload, output, force):
     print(f"Wrote {output}.")
 
 
+def count(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def cmd_boards(args):
-    store = Store(args.data)
+    store = Store(args.data, starter=False)  # looking doesn't create a file
     boards = store.list_boards()
     if args.json:
         write_json(boards, None, False)
         return
     for b in boards:
         extra = f", {b['archived']} archived" if b["archived"] else ""
-        print(f"{b['id']}  {b['name']}  ({b['cards']} cards{extra})")
+        print(f"{b['id']}  {b['name']}  ({count(b['cards'], 'card')}{extra})")
     if not boards:
         print("No boards yet.")
 
@@ -208,31 +212,27 @@ def cmd_archive(args):
     print(f"{'Restored' if args.restore else 'Archived'} {args.key}.")
 
 
-def _cards(n):
-    return f"{n} card{'' if n == 1 else 's'}"
-
-
 def cmd_import(args):
     store = Store(args.data, starter=False)  # the first thing in a new file is what's being added
     for board in store.import_data(read_json(args.file)):
-        print(f"Imported {board['name']} with {_cards(len(board['cards']))} as {board['id']}.")
+        print(f"Imported {board['name']} with {count(len(board['cards']), 'card')} as {board['id']}.")
 
 
 def cmd_export(args):
     if args.all == bool(args.board):
         raise StoreError("Name one board to export, or use --all.")
-    store = Store(args.data)
+    store = Store(args.data, starter=False)
     write_json(store.all_data() if args.all else store.get_board(find_board(store, args.board)), args.output, args.force)
 
 
 def cmd_sample(args):
     if not args.name:
         for s in samples.list_samples():
-            print(f"{s['name']:<20} {s['title']} ({s['cards']} cards). {s['description']}")
+            print(f"{s['name']:<20} {s['title']} ({count(s['cards'], 'card')}). {s['description']}")
         return
     store = Store(args.data, starter=False)
     board = store.import_board(samples.load(args.name))
-    print(f"Added {board['name']} with {_cards(len(board['cards']))} as {board['id']}.")
+    print(f"Added {board['name']} with {count(len(board['cards']), 'card')} as {board['id']}.")
 
 
 def _describe(item):
@@ -242,7 +242,7 @@ def _describe(item):
     try:
         with open(item["path"], "rb") as f:
             data, _ = load_bytes(f.read(), item["name"])
-        contents = f"{len(data['boards'])} boards, {sum(len(b['cards']) for b in data['boards'])} cards"
+        contents = f"{count(len(data['boards']), 'board')}, {count(sum(len(b['cards']) for b in data['boards']), 'card')}"
     except (OSError, StoreError):
         contents = "can't be read"
     return f"{item['name']:<42} {when}  {size:>8}  {contents}"
@@ -262,7 +262,7 @@ def cmd_backups(args):
 
 def cmd_restore(args):
     done = restore_backup(args.data, args.name)
-    print(f"Restored {args.name}: {done['boards']} boards, {done['cards']} cards.")
+    print(f"Restored {args.name}: {count(done['boards'], 'board')}, {count(done['cards'], 'card')}.")
     if done["kept"]:
         print(f"The file it replaced is kept as {os.path.basename(done['kept'])}.")
 

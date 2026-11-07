@@ -5,6 +5,7 @@ import time
 import unittest
 
 from laneboard import samples
+from laneboard.schema import COLORS
 from laneboard.store import (Conflict, NotFound, StaleRevision, Store, StoreError, default_data_path)
 
 
@@ -128,7 +129,7 @@ class BoardTest(StoreTestCase):
             self.store.update_board(self.board, {"groups": [{"name": "A", "prefix": "A", "link": "javascript:alert(1)"}]})
         board = self.store.update_board(self.board, {"groups": [
             {"name": "A", "prefix": "A", "link": "https://example.com/a", "details": [{"label": "Owner", "value": "Team A"}]}]})
-        self.assertEqual(board["groups"][0]["color"], "slate")
+        self.assertEqual(board["groups"][0]["color"], COLORS[0])
         self.assertEqual(board["groups"][0]["details"], [{"label": "Owner", "value": "Team A"}])
 
 

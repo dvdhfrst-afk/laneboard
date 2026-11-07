@@ -554,7 +554,7 @@ class Store:
             if name.lower() in names:
                 raise StoreError(f"There are two groups named {name}.")
             names.add(name.lower())
-            color = g.get("color") or "slate"
+            color = g.get("color") or COLORS[(len(names) - 1) % len(COLORS)]  # a hand-written file needn't choose
             if not isinstance(color, str) or color not in COLORS:
                 raise StoreError(f"That isn't one of the colors: {', '.join(COLORS)}.")
             link = text(g.get("link"), "Link", 500)

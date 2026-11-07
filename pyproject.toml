@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "laneboard"
 dynamic = ["version"]
 description = "A local kanban board that keeps everything in one JSON file."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "The Laneboard authors" }]
 requires-python = ">=3.9"
 dependencies = []
@@ -15,7 +16,7 @@ keywords = ["kanban", "board", "local-first", "tasks"]
 classifiers = [
     "Environment :: Web Environment",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.9",
     "Topic :: Office/Business :: Scheduling",
 ]
@@ -24,11 +25,11 @@ classifiers = [
 laneboard = "laneboard.cli:main"
 
 [tool.setuptools]
-packages = ["laneboard", "laneboard.samples"]
+packages = ["laneboard", "laneboard.samples", "laneboard.static"]
 
 [tool.setuptools.dynamic]
 version = { attr = "laneboard.__version__" }
 
 [tool.setuptools.package-data]
-laneboard = ["static/*"]
 "laneboard.samples" = ["*.json"]
+"laneboard.static" = ["*"]

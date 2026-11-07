@@ -11,3 +11,10 @@ boards.json.bak
 *.bak
 *.lock
 *.backups/
+.pytest_cache/
+.mypy_cache/
+coverage/
+node_modules/
+target/
+venv/
+.next/

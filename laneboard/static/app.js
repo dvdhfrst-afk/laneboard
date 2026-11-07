@@ -36,6 +36,10 @@ let index = { byKey: new Map(), byColumn: new Map(), groups: new Map(), checkIds
 // the person has moved on to another board by the time it runs.
 const revs = new Map();
 
+// The open board as the server last described it. What's on screen can be ahead of this while
+// changes are on their way.
+let latest = null;
+
 // Notes that couldn't be saved after their card was closed. Nothing typed gets thrown away.
 const drafts = new Map();
 
@@ -78,8 +82,15 @@ const isWebLink = (url) => /^https?:\/\//i.test(url);
 
 function setBoard(board) {
   state.board = board;
+  latest = board;
   if (board) revs.set(board.id, board.rev);
   reindex();
+}
+
+function showBoard(board) {
+  setBoard(board);
+  syncListEntry();
+  render();
 }
 
 function reindex() {
@@ -281,7 +292,13 @@ let pending = 0;
 function enqueue(task) {
   pending++;
   const run = queue.then(task);
-  queue = run.then(() => {}, () => {}).then(() => { pending--; });
+  queue = run.then(() => {}, () => {}).then(() => {
+    pending--;
+    if (!pending && latest && state.board?.id === latest.id && state.board !== latest) {  // the last change failed
+      showBoard(latest);
+      sheet.sync?.();
+    }
+  });
   return run;
 }
 
@@ -292,9 +309,8 @@ function enqueue(task) {
 function send(method, path, body, { retry = false } = {}) {
   const id = state.board.id;
   return enqueue(async () => {
-    const open = () => (state.board?.id === id ? state.board : null);
-    const attempt = () => api(method, `/api/boards/${id}${path}`, typeof body === "function" ? body(open()) : body,
-      open()?.rev ?? revs.get(id));
+    const open = () => state.board?.id === id;
+    const attempt = () => api(method, `/api/boards/${id}${path}`, typeof body === "function" ? body(open() ? latest : null) : body, revs.get(id));
     let data;
     try {
       data = await attempt();
@@ -302,11 +318,7 @@ function send(method, path, body, { retry = false } = {}) {
       if (e.status !== 412) throw e;
       const fresh = (await api("GET", `/api/boards/${id}`)).board;
       revs.set(id, fresh.rev);
-      if (open()) {
-        setBoard(fresh);
-        syncListEntry();
-        render();
-      }
+      if (open()) showBoard(fresh);
       if (retry === true || (retry && retry(fresh))) {
         data = await attempt();
       } else {
@@ -318,10 +330,12 @@ function send(method, path, body, { retry = false } = {}) {
     if (data.board) {
       revs.set(id, data.board.rev);
       if (open()) {
-        setBoard(data.board);
-        syncListEntry();
-        render();
-        if (pending === 1) sheet.sync?.();  // later changes are still on their way; the last one does this
+        latest = data.board;
+        // With more on the way the screen is already ahead of this answer, and drawing it would put things back.
+        if (pending === 1) {
+          showBoard(data.board);
+          sheet.sync?.();
+        }
       }
     }
     return data;
@@ -484,8 +498,8 @@ function renderPicker() {
 
 function renderMenu() {
   const b = state.board;
-  const item = (label, run, disabled) => h("button", { type: "button", role: "menuitem", text: label, disabled, onclick: () => { closeMenu(); run(); } });
-  const link = (label, href) => h("a", { role: "menuitem", href, download: "", text: label, onclick: closeMenu });
+  const item = (label, run, disabled) => h("button", { type: "button", text: label, disabled, onclick: () => { closeMenu(); run(); } });
+  const link = (label, href) => h("a", { href, download: "", text: label, onclick: closeMenu });
   const boardItems = b ? [
     item(`Archived cards (${index.archived.length})`, openArchive),
     link("Export this board", `/api/boards/${b.id}/export`),
@@ -980,7 +994,7 @@ function openCard(key, { keepPlace = false } = {}) {
   let baseline = card.notes;  // what the card held then, to tell whether someone else has changed it since
   const differs = () => notes.value.trimEnd() !== saved.trimEnd();
   const busy = () => timer !== null || differs();
-  const otherNotes = () => cardBy(key)?.notes ?? "";
+  const otherNotes = () => (latest?.id === boardId ? latest.cards.find((c) => c.key === key)?.notes : null) ?? "";
   const otherChanged = () => otherNotes() !== baseline;
   const showConflict = () => {
     if (status.querySelector("button")) return;  // clicking one of them blurs the box, which lands here again
@@ -1660,9 +1674,7 @@ async function refresh() {
       renderPicker();
       return;
     }
-    setBoard(fresh);
-    syncListEntry();
-    render();
+    showBoard(fresh);
     sheet.sync?.();
   } catch {
     // Being stopped or having a broken file shows in the banner; the next round tries again.

@@ -74,10 +74,10 @@ class HelpTest(CliCase):
 
     def test_data_goes_before_or_after_the_command(self):
         other = os.path.join(self.tmp.name, "other.json")
-        self.run_cli("--data", other, "boards")
+        self.run_cli("--data", other, "sample", "garden")
         self.assertTrue(os.path.exists(other))
         other2 = os.path.join(self.tmp.name, "other2.json")
-        self.run_cli("boards", "--data", other2)
+        self.run_cli("sample", "garden", "--data", other2)
         self.assertTrue(os.path.exists(other2))
         self.assertFalse(os.path.exists(self.data))
 
@@ -85,8 +85,8 @@ class HelpTest(CliCase):
 class WorkflowTest(CliCase):
     def test_a_whole_session(self):
         out, _ = self.run_cli("boards")
-        self.assertIn("My board", out)
-        self.assertIn("(0 cards)", out)
+        self.assertIn("No boards yet", out)
+        self.assertFalse(os.path.exists(self.data), "looking doesn't create a file")
         out, _ = self.run_cli("add", "My board", "Buy stamps", "--summary", "A book of ten")
         self.assertEqual(out.strip(), "T-1")
         self.run_cli("add", "my BOARD", "Second", "--column", "Ready")
@@ -100,7 +100,7 @@ class WorkflowTest(CliCase):
         self.assertIn("Moved T-1 to Done", out)
         self.run_cli("archive", "My board", "T-1")
         out, _ = self.run_cli("boards")
-        self.assertIn("1 cards, 1 archived", out)
+        self.assertIn("1 card, 1 archived", out)
         out, _ = self.run_cli("cards", "My board", "--archived", "--json")
         self.assertEqual(json.loads(out)[0]["key"], "T-1")
         self.run_cli("archive", "My board", "T-1", "--restore")
@@ -147,9 +147,9 @@ class WorkflowTest(CliCase):
         self.run_cli("add", "My board", "Two")
         out, _ = self.run_cli("backups")
         self.assertIn("previous", out)
-        self.assertIn("1 boards, 1 cards", out)
+        self.assertIn("1 board, 1 card", out)
         out, _ = self.run_cli("restore", "previous")
-        self.assertIn("1 boards, 1 cards", out)
+        self.assertIn("1 board, 1 card", out)
         out, _ = self.run_cli("cards", "My board")
         self.assertNotIn("T-2", out)
         _, err = self.run_cli("restore", "nothing", code=1)
@@ -159,7 +159,7 @@ class WorkflowTest(CliCase):
         out, _ = self.run_cli("check")
         self.assertIn("doesn't exist yet", out)
         self.assertFalse(os.path.exists(self.data))
-        self.run_cli("boards")
+        self.run_cli("sample", "garden")
         out, _ = self.run_cli("check")
         self.assertIn("OK", out)
         with open(self.data, "w", encoding="utf-8") as f:
@@ -214,7 +214,7 @@ class FailureTest(CliCase):
             self.assertIn("is a folder", err)
 
     def test_two_boards_with_the_same_name_ask_for_an_id(self):
-        self.run_cli("boards")
+        self.run_cli("import", "-", stdin=b'{"name": "My board"}')
         self.run_cli("import", "-", stdin=b'{"name": "My board"}')
         _, err = self.run_cli("cards", "My board", code=1)
         self.assertIn("Use one of these ids", err)
@@ -348,9 +348,45 @@ class InProcessTest(CliCase):
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
                 self.assertEqual(cli.main(["boards", "--json"]), 0)
-            self.assertEqual(json.loads(buffer.getvalue())[0]["name"], "My board")
+            self.assertEqual(json.loads(buffer.getvalue()), [])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(cli.main(["cards", "Nope"]), 1)
+
+
+NO_CONSOLE = """
+import json, os, sys, threading, time, urllib.error, urllib.request
+port, result, data = sys.argv[1:4]
+def probe():
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    base = "http://127.0.0.1:" + port
+    seen = []
+    time.sleep(1)
+    seen.append(opener.open(base + "/api/health", timeout=5).status)
+    seen.append(opener.open(base + "/", timeout=5).status)
+    request = urllib.request.Request(base + "/api/boards", method="POST", data=b'{"name": "x"}',
+                                     headers={"Content-Type": "application/json"})
+    seen.append(opener.open(request, timeout=5).status)
+    try:
+        opener.open(base + "/nope", timeout=5)
+    except urllib.error.HTTPError as e:
+        seen.append(e.code)
+    with open(result, "w") as f:
+        json.dump(seen, f)
+    os._exit(0)
+threading.Thread(target=probe, daemon=True).start()
+sys.stdout = sys.stderr = None  # what pythonw gives a program started from a desktop shortcut
+from laneboard.cli import main
+main(["--port", port, "--data", data, "--verbose"])
+"""
+
+
+class NoConsole(CliCase):
+    def test_serving_and_logging_with_nowhere_to_print(self):
+        result = os.path.join(self.tmp.name, "result.json")
+        subprocess.run([sys.executable, "-c", NO_CONSOLE, str(free_port()), result, self.data],
+                       env=self.env(), cwd=self.tmp.name, timeout=30, capture_output=True)
+        with open(result, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), [200, 200, 201, 404])
 
 
 class NewFile(CliCase):

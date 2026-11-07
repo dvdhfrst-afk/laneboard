@@ -71,16 +71,19 @@ class FileLock:
             self._fd = None
 
 
-def _replace(source, target, tries=12):
-    """os.replace, waiting out the moment Windows refuses because a scanner or reader has the file open."""
+def _waiting_out_locks(action, tries=12):
+    """Do something to a file, waiting out the moment Windows refuses because a scanner or reader has it open."""
     for attempt in range(tries):
         try:
-            os.replace(source, target)
-            return
+            return action()
         except PermissionError:
             if os.name != "nt" or attempt == tries - 1:
                 raise
             time.sleep(0.05 + attempt * 0.02)
+
+
+def _replace(source, target):
+    _waiting_out_locks(lambda: os.replace(source, target))
 
 
 def _sync_folder(folder):
@@ -126,7 +129,7 @@ def copy_atomic(source, target):
     fd, tmp = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=TEMP_SUFFIX, dir=folder)
     os.close(fd)
     try:
-        shutil.copyfile(source, tmp)
+        _waiting_out_locks(lambda: shutil.copyfile(source, tmp))
         _replace(tmp, target)
     except BaseException:
         try:

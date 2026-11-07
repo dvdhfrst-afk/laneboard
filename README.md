@@ -2,107 +2,216 @@
 
 A kanban board that runs on your own computer. It is one small Python program with no
 dependencies, a web page you open in your browser, and one JSON file that holds every board.
-Nothing is sent anywhere.
+Nothing is sent anywhere, and there is no account to make.
+
+It is built for one person on one computer. It has no sign-in and no sync, and it isn't made to be
+shared over a network. If several people need the same board, use something else.
 
 - Several boards, each with its own columns, groups and card keys
-- Cards with a summary, fields, sections, working notes and an optional "blocked by" line
+- Cards with a summary, fields, sections, working notes and a "blocked by" line
 - Checklists that every card ticks through on its own, with progress shown on each card
-- A set of sections every new card starts with
-- Drag cards between columns, or pick the column from the card
-- Search and filter by group
-- Column limits that flag a column when it holds too many cards
-- Changes save as you make them; edits made in two tabs never silently overwrite each other
+- Drag cards between columns, or move them with the keyboard or the buttons on a card
+- Search, filter by group or blocked cards, collapse columns, flag a column that holds too many cards
+- Archive cards to get them out of the way without losing them; duplicate cards and boards
+- Import and export from the page or the command line, and a command line for scripts
+- Changes save as you make them. Edits made in two tabs don't silently overwrite each other
+- A dated backup every day you make changes, and a `restore` command to go back to one
 
-## Run it
+## Install and run
 
-You need Python 3.9 or newer.
+You need Python 3.9 or newer. Nothing else gets installed. On macOS and Linux the command may be
+`python3` rather than `python`. From a copy of this repository:
 
-```
+```bash
 python -m laneboard --open
 ```
 
-That starts the board at http://127.0.0.1:8642 and opens it in your browser. Leave the window
-running while you use the board; Ctrl+C stops it. Running the command again while the board is
-already up just opens the page.
+That starts the board and opens it in your browser. It prints one line and keeps running:
 
-To install it as a command instead:
-
+```text
+Laneboard 1.0.0 at http://127.0.0.1:8642/  (data: /your/home/.local/share/laneboard/boards.json)  Ctrl+C stops it.
 ```
-pip install .
+
+Leave it running while you use the board. Ctrl+C stops it, and nothing is lost when it stops,
+since every change has already been saved. Running the command again while the board is up just
+opens the page.
+
+To have a `laneboard` command that works from any folder:
+
+```bash
+python -m pip install .
+```
+
+```bash
 laneboard --open
 ```
+
+If port 8642 is taken by something else, Laneboard says so. Pick another with `--port`:
+
+```bash
+laneboard --port 8700 --open
+```
+
+## Your first five minutes
+
+The first run gives you an empty board called **My board**, with a choice of two example boards to
+look around. You can also add one from the command line:
+
+```bash
+laneboard sample garden
+```
+
+Press `n` to add a card. Click a card to open it, and type in **Notes**; they save as you type. Drag
+the card to another column. **Board settings** changes the columns and adds groups. Press `?` at any
+time to see the keyboard shortcuts and where your data is.
+
+[docs/examples.md](docs/examples.md) has worked examples, including using the board from a script.
+
+## Using the board
+
+- **New card** (or `n`) adds a card. The **+** at the top of a column adds one there.
+- Click a card to open it. **Edit** changes everything except notes and ticks, which save as you go.
+- **Archive** takes a card off the board. Find it again under **More**, **Archived cards**.
+- In any card text, wrap code in `backticks` to get a Copy button. Web addresses become links. A
+  section with several lines shows as a list.
+- A **group** can be a repo, a client or a project. Its key prefix starts the keys of its cards
+  (`WEB-1`), and its details show in a table under the board.
+- **New card sections** in Board settings lists the sections a new card starts with. **Checklists**
+  are lists every card ticks through on its own: one line per item, and a line starting with `#` is
+  a heading. Lines you don't change keep their ticks when you edit a checklist.
+- Removing a column that holds cards asks which column they should move to.
+- Collapsing a column is remembered in that browser. It isn't saved in your boards file.
+
+Columns show the first 300 cards with a button for more, so a very long column stays quick.
+
+### Keyboard
+
+| Key | Does |
+|---|---|
+| `n` | New card |
+| `/` | Search |
+| `?` | Shortcuts and where your data is |
+| Arrow keys | Go from card to card (Tab reaches the board, then arrows take over) |
+| Enter | Open the card |
+| Shift + Up or Down | Move the card within its column |
+| Shift + Left or Right | Move the card to the next column |
+| Esc | Close what's open, or clear the search |
+
+Dragging doesn't work on touch screens. Open the card and use its column list and arrow buttons.
 
 ## Where your boards are kept
 
 All boards live in one file, outside this folder:
 
-| System  | File |
-|---------|------|
+| System | File |
+|---|---|
 | Windows | `%APPDATA%\laneboard\boards.json` |
 | macOS and Linux | `$XDG_DATA_HOME/laneboard/boards.json`, or `~/.local/share/laneboard/boards.json` |
 
-Set `LANEBOARD_DATA` or pass `--data FILE` to use a different file. Every save writes the file
-in one step and keeps the previous version next to it as `boards.json.bak`. You can edit the
-file by hand while the board is running; the page picks up the change when you come back to it.
+Set `LANEBOARD_DATA` or pass `--data FILE` to use a different file. `--data` works before or after
+the command name.
 
-## Moving boards in and out
+Saving writes a new file and swaps it into place in one step, so a crash or power cut leaves either
+the old version or the new one, not half of each. You can edit the file by hand while the board is
+running. The page notices within a few seconds, and if your edit leaves the file broken Laneboard
+tells you and changes nothing until it's fixed. The format is described in
+[docs/file-format.md](docs/file-format.md).
 
+### Backups
+
+Next to your file:
+
+- `boards.json.bak` is the version before the last save.
+- `boards.json.backups/` holds one copy per day you made changes, and a copy taken before a board
+  is deleted or a backup is restored. The newest 30 are kept.
+- `boards.json.v1.bak` is your file as it was before Laneboard upgraded its format, if that happened.
+
+To go back:
+
+```bash
+laneboard backups
 ```
-python -m laneboard boards                      # list boards
-python -m laneboard export "Garden project"     # print a board as JSON (by name or id)
-python -m laneboard import board.json           # add a board from a JSON file
+
+```bash
+laneboard restore previous
 ```
 
-An exported board can be imported into another file or another computer. Card keys are kept.
-To try the board with example data:
+`restore` first keeps what it replaces, so you can change your mind. It works while
+the board is running, and it works when the current file is broken. Copies of your file on another
+disk are still your job; these backups sit in the same folder.
 
-```
-python -m laneboard import sample/sample-board.json
-```
+## Command line
 
-## Using the board
+Every command takes `--help`. A board can be named by its name or id.
 
-- **New card** (or press `n`) adds a card. The **+** at the top of a column adds one there.
-- Click a card to open it. **Edit** changes everything except notes; notes save as you type.
-- In a section, a line wrapped in `backticks` shows as code, and a section with several lines
-  shows as a list. Web addresses become links.
-- **Board settings** sets the board name, columns (with optional limits), and groups. A group
-  could be a repo, a client or a project; its key prefix starts the keys of its cards (`WEB-1`),
-  and its details show in the table under the board.
-- Also in **Board settings**: **New card sections** lists the sections a new card starts with
-  (any left empty aren't saved), and **Checklists** holds lists every card ticks through on its
-  own. One line per item; a line that starts with `#` is a heading. Ticks save as you click.
-- Press `/` to search. Click a group chip to show only that group's cards.
+| Command | Does |
+|---|---|
+| `laneboard` or `laneboard serve` | Run the board. `--open`, `--port PORT`, `--verbose` |
+| `laneboard boards` | List boards. `--json` |
+| `laneboard cards BOARD` | List cards. `--column NAME`, `--archived`, `--json` |
+| `laneboard add BOARD TITLE` | Add a card and print its key. `--column`, `--group`, `--summary` |
+| `laneboard move BOARD KEY COLUMN` | Move a card to the bottom of a column |
+| `laneboard archive BOARD KEY` | Archive a card. `--restore` brings it back |
+| `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing |
+| `laneboard export BOARD` | Write a board as JSON. `-o FILE`, `--force`, or `--all` for every board |
+| `laneboard sample [NAME]` | List the example boards, or add one |
+| `laneboard backups` | List the copies you can go back to |
+| `laneboard restore NAME` | Go back to one |
+| `laneboard check` | Check that the file can be read, without changing it |
+
+Commands can run while the board is running. The page picks up what they do.
+
+Exit codes: `0` it worked, `1` it failed with a message saying why, `2` the command itself was
+wrong, `130` you pressed Ctrl+C.
+
+## When something goes wrong
+
+| What you see | What it means |
+|---|---|
+| A red bar saying Laneboard can't be reached | The program stopped. Start it again; the page reconnects by itself and saves what you typed. |
+| A red bar saying the boards file has a problem | The file was damaged or edited badly. It names the place. Nothing is overwritten. Fix it by hand or use `laneboard restore`. |
+| A bar about two version numbers | The page and the running program differ. Stop Laneboard, start it again, then reload the page. |
+| "These notes also changed somewhere else" | Another tab or a command changed them. Your text is still in the box; choose which to keep. |
+| "Can't save ... Your change was not saved" | The file or folder can't be written (read-only, disk full, held by another program). Your text stays on the page. |
+| "That file was written by a newer Laneboard" | Update Laneboard. Your file is left as it was. |
 
 ## Safety
 
-The server only listens on `127.0.0.1`, only answers requests addressed to this computer (`127.0.0.1` or `localhost`), and
-refuses changes that come from other web pages. The page loads nothing from other sites.
+Laneboard has no sign-in, so it relies on staying private to this computer:
+
+- It listens only on `127.0.0.1`, and there is no option to change that.
+- It answers only requests addressed to this computer, which stops DNS rebinding (a web page tricking
+  your browser into treating a site's address as your machine).
+- It refuses changes that come from other web pages.
+- The page loads nothing from other sites, and a strict content security policy stops it running any
+  script it didn't bring. Card text is always shown as text, even from an imported file.
+
+Other programs running on your computer as you can still reach it, the same way they can read your
+files. The file isn't encrypted. To reach a board from another computer you control, use an SSH
+tunnel rather than exposing the port:
+
+```bash
+ssh -L 8642:127.0.0.1:8642 you@that-computer
+```
+
+Details and how to report a problem are in [SECURITY.md](SECURITY.md).
+
+## What has been tested
+
+The short version: the test suite and real-browser sessions ran on Windows 11, the suite also ran on
+Linux, and **macOS, Firefox and Safari have not been tried**. Nobody but the authors has used this
+yet. [docs/testing.md](docs/testing.md) has the numbers and the full list, including how big a board
+was measured and how quick it was.
 
 ## Development
 
-```
+```bash
 python -m unittest
 ```
 
-The code is in `laneboard/`: `store.py` (the data file and its rules), `server.py` (HTTP and the
-JSON API), `__main__.py` (the command line), and `static/` (the page).
-
-### API
-
-All bodies are JSON. Changes can send the board's `rev` in an `If-Match` header; if the board has
-changed since, the server answers `412` and changes nothing.
-
-| Method and path | Does |
-|---|---|
-| `GET /api/boards` | List boards |
-| `POST /api/boards` | Create a board: `{name, description}` |
-| `GET /api/boards/<id>` | Get a board with its cards |
-| `PATCH /api/boards/<id>` | Change `name`, `description`, `prefix`, `groupLabel`, `columns`, `groups` |
-| `DELETE /api/boards/<id>` | Delete a board |
-| `POST /api/boards/<id>/cards` | Add a card; the answer includes its `key` |
-| `PATCH /api/boards/<id>/cards/<key>` | Change a card |
-| `DELETE /api/boards/<id>/cards/<key>` | Delete a card |
+No install is needed. [CONTRIBUTING.md](CONTRIBUTING.md) covers the code layout and the optional
+browser tests, and [docs/api.md](docs/api.md) the JSON API the page uses. Changes are listed in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
