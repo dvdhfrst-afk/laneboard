@@ -5,7 +5,7 @@ import tempfile
 import threading
 import unittest
 
-from laneboard.server import BoardServer
+from laneboard.server import MAX_BODY, BoardServer
 from laneboard.store import Store
 
 
@@ -49,7 +49,7 @@ class ServerTest(unittest.TestCase):
         status, body, res = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn(b"<title>Laneboard</title>", body)
-        self.assertIn("default-src 'self'", res.getheader("Content-Security-Policy"))
+        self.assertIn("default-src 'none'", res.getheader("Content-Security-Policy"))
         self.assertEqual(res.getheader("X-Content-Type-Options"), "nosniff")
         for name in ("app.js", "app.css", "icon.svg"):
             status, _, _ = self.request("GET", "/static/" + name)
@@ -112,7 +112,7 @@ class ServerTest(unittest.TestCase):
 
     def test_unknown_route_and_wrong_method(self):
         self.assertEqual(self.request("GET", "/api/nothing")[0], 404)
-        self.assertEqual(self.request("PUT", "/api/boards")[0], 501)  # no do_PUT at all
+        self.assertEqual(self.request("PUT", "/api/boards")[0], 405)
         self.assertEqual(self.request("DELETE", "/api/boards")[0], 405)
         self.assertEqual(self.request("POST", "/index.html", {"a": 1})[0], 405)
 
@@ -140,7 +140,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
 
     def test_large_bodies_are_refused(self):
-        status, _, _ = self.request("POST", "/api/boards", raw=b"x" * 1_000_001, headers={"Content-Type": "application/json"})
+        status, _, _ = self.request("POST", "/api/boards", raw=b"x" * (MAX_BODY + 1), headers={"Content-Type": "application/json"})
         self.assertEqual(status, 413)
 
 

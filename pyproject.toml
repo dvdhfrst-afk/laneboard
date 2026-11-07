@@ -4,18 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "laneboard"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A local kanban board that keeps everything in one JSON file."
 readme = "README.md"
 license = { text = "MIT" }
+authors = [{ name = "The Laneboard authors" }]
 requires-python = ">=3.9"
 dependencies = []
+keywords = ["kanban", "board", "local-first", "tasks"]
+classifiers = [
+    "Environment :: Web Environment",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Office/Business :: Scheduling",
+]
 
 [project.scripts]
-laneboard = "laneboard.__main__:main"
+laneboard = "laneboard.cli:main"
 
 [tool.setuptools]
-packages = ["laneboard"]
+packages = ["laneboard", "laneboard.samples"]
+
+[tool.setuptools.dynamic]
+version = { attr = "laneboard.__version__" }
 
 [tool.setuptools.package-data]
 laneboard = ["static/*"]
+"laneboard.samples" = ["*.json"]

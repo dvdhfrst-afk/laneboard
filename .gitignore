@@ -8,3 +8,6 @@ dist/
 boards.json
 boards.json.bak
 .boards-*.tmp
+*.bak
+*.lock
+*.backups/

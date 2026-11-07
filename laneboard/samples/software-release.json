@@ -1,0 +1,50 @@
+{
+ "name": "Software release",
+ "description": "A made-up release board: groups per component, a checklist every card ticks through, and a set of sections each new card starts with.",
+ "prefix": "REL",
+ "groupLabel": "Component",
+ "columns": [
+  {"name": "To do", "limit": null},
+  {"name": "Doing", "limit": 3},
+  {"name": "In review", "limit": 2},
+  {"name": "Shipped", "limit": null}
+ ],
+ "groups": [
+  {"name": "Web app", "prefix": "WEB", "color": "teal", "link": "https://example.com/web",
+   "details": [{"label": "Owner", "value": "Front end team"}, {"label": "Repo", "value": "`example/web`"}]},
+  {"name": "API", "prefix": "API", "color": "violet", "link": "https://example.com/api",
+   "details": [{"label": "Owner", "value": "Platform team"}, {"label": "Repo", "value": "`example/api`"}]}
+ ],
+ "template": ["Problem", "Done when"],
+ "checklists": [
+  {"id": "before-merge", "name": "Before merge", "items": [
+   {"id": "tests", "text": "Tests pass"},
+   {"id": "review", "text": "Someone else has read it"},
+   {"id": "notes-heading", "text": "Release notes", "heading": true},
+   {"id": "changelog", "text": "Changelog updated"}
+  ]}
+ ],
+ "cards": [
+  {"key": "WEB-1", "title": "Show a clear message when the session ends", "group": "web-app", "column": "doing", "rank": 1,
+   "summary": "People lose what they typed when their session ends behind the scenes.",
+   "fields": [{"label": "Size", "value": "1 day"}],
+   "sections": [{"label": "Problem", "body": "The page keeps showing old data after the session ends."},
+                {"label": "Done when", "body": "A banner explains what happened\nTyped text is still there after signing in again"}],
+   "checks": ["tests"]},
+  {"key": "API-1", "title": "Rate limit the search endpoint", "group": "api", "column": "in-review", "rank": 2,
+   "summary": "Search is the only endpoint with no limit.",
+   "fields": [{"label": "Size", "value": "2 days"}],
+   "sections": [{"label": "Done when", "body": "`GET /search` answers `429` past the limit\nThe limit is in the docs"}],
+   "checks": ["tests", "review"],
+   "notes": "Waiting on one more read of the retry logic."},
+  {"key": "API-2", "title": "Add an index for the audit query", "group": "api", "column": "to-do", "rank": 3,
+   "blocked": "Needs the maintenance window."},
+  {"key": "WEB-2", "title": "Fix the date picker on narrow screens", "group": "web-app", "column": "shipped", "rank": 4,
+   "checks": ["tests", "review", "changelog"]},
+  {"key": "REL-1", "title": "Write the upgrade guide", "column": "to-do", "rank": 5,
+   "sections": [{"label": "Problem", "body": "Two settings changed names."}]},
+  {"key": "REL-2", "title": "Try the old installer on a clean machine", "column": "shipped", "rank": 6,
+   "archived": "2026-01-15T10:00:00Z",
+   "summary": "An archived card: it stays out of the way until you look in Archived cards."}
+ ]
+}

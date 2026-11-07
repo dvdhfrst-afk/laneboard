@@ -4,6 +4,7 @@ import tempfile
 import time
 import unittest
 
+from laneboard import samples
 from laneboard.store import (Conflict, NotFound, StaleRevision, Store, StoreError, default_data_path)
 
 
@@ -313,10 +314,9 @@ class ImportTest(StoreTestCase):
             self.store.import_board({"name": "Bad", "cards": [{"key": "t1", "title": "a"}]})
 
     def test_sample_board_imports(self):
-        sample = os.path.join(os.path.dirname(__file__), os.pardir, "sample", "sample-board.json")
-        with open(sample, encoding="utf-8") as f:
-            board = self.store.import_board(json.load(f))
-        self.assertGreater(len(board["cards"]), 0)
+        for name in samples.names():
+            board = self.store.import_board(samples.load(name))
+            self.assertGreater(len(board["cards"]), 0, name)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
  "name": "Garden project",
- "description": "A made-up board that shows what a card can hold. Import it with: python -m laneboard import sample/sample-board.json",
+ "description": "A made-up board that shows what a card can hold: fields, sections, code, links and a blocked card.",
  "prefix": "T",
  "groupLabel": "Area",
  "columns": [
