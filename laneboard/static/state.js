@@ -1,7 +1,7 @@
 // What the page knows: the open board and its lookup tables, the revision per board, unsaved notes, what the side
 // sheet shows, and the address. Other modules import these; nothing keeps its own copy.
 
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.1.0";
 export const COLORS = ["blue", "teal", "violet", "amber", "rose", "green", "slate"];
 export const START_COMMAND = "python -m laneboard";
 const LAST_BOARD = "laneboard:last-board";

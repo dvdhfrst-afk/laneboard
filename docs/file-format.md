@@ -204,7 +204,7 @@ save it keeps the original, byte for byte, as `boards.json.v2.bak` (with the num
 |---|---|
 | none or 1 | The original format |
 | 2 | Cards get `archived` |
-| 3 | Boards get `labels`, `properties`, `views` and `settings`; cards get `labels`, `properties` and `tasks`; the file gets `templates` |
+| 3 | Boards get `labels`, `properties`, `views`, `settings` and `archived`; columns get `done`; cards get `labels`, `properties` and `tasks`; the file gets `templates` |
 
 A file from a newer Laneboard is refused with a message and not touched.
 

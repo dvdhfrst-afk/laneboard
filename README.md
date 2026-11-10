@@ -31,7 +31,7 @@ python -m laneboard --open
 That starts the board and opens it in your browser. It prints one line and keeps running:
 
 ```text
-Laneboard 1.0.0 at http://127.0.0.1:8642/  (data: /your/home/.local/share/laneboard/boards.json)  Ctrl+C stops it.
+Laneboard 1.1.0 at http://127.0.0.1:8642/  (data: /your/home/.local/share/laneboard/boards.json)  Ctrl+C stops it.
 ```
 
 Leave it running while you use the board. Ctrl+C stops it, and nothing is lost when it stops,
