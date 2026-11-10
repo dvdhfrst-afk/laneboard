@@ -824,7 +824,7 @@ class LongSession(BrowserCase):
 
     def settle(self, page):
         """Wait for everything sent to have been answered, as someone reading the screen would."""
-        self.until(page, "pending === 0")
+        self.until(page, "import('/static/api.js').then((m) => m.pending === 0)")  # the page's own change queue
 
     def test_session(self):
         rng = random.Random(20261107)

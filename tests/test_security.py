@@ -96,7 +96,7 @@ class DnsRebindingTest(ServerCase):
     def test_other_host_names_are_refused_everywhere(self):
         for host in ("evil.example", f"evil.example:{self.port}", "127.0.0.1.evil.example", "localhost.evil.example:80",
                      f"192.168.1.5:{self.port}", "0.0.0.0", "[::ffff:127.0.0.1]", ""):
-            for path in ("/", "/static/app.js", "/api/health", "/api/boards"):
+            for path in ("/", "/static/main.js", "/api/health", "/api/boards"):
                 status, _, _ = self.request("GET", path, headers={"Host": host})
                 self.assertEqual(status, 403, (host, path))
 
@@ -110,7 +110,7 @@ class DnsRebindingTest(ServerCase):
 
 class ResponseHeaderTest(ServerCase):
     def test_every_response_carries_the_protections(self):
-        for path in ("/", "/static/app.js", "/api/boards", "/api/nothing", "/nothing"):
+        for path in ("/", "/static/main.js", "/api/boards", "/api/nothing", "/nothing"):
             _, _, res = self.request("GET", path)
             csp = res.getheader("Content-Security-Policy")
             self.assertIn("default-src 'none'", csp, path)
@@ -124,7 +124,7 @@ class ResponseHeaderTest(ServerCase):
 
     def test_content_types_do_not_depend_on_the_system(self):
         with mock.patch("mimetypes.guess_type", return_value=("text/plain", None)):
-            for name, want in (("app.js", "text/javascript"), ("app.css", "text/css"), ("icon.svg", "image/svg+xml")):
+            for name, want in (("main.js", "text/javascript"), ("app.css", "text/css"), ("icon.svg", "image/svg+xml")):
                 _, _, res = self.request("GET", "/static/" + name)
                 self.assertTrue(res.getheader("Content-Type").startswith(want), name)
 
@@ -136,10 +136,10 @@ class ResponseHeaderTest(ServerCase):
 class PathTest(ServerCase):
     def test_nothing_outside_the_static_folder_is_served(self):
         for path in ("/static/../store.py", "/static/%2e%2e/store.py", "/static/..%2fstore.py", "/static/..%5cstore.py",
-                     "/static/....//store.py", "/static/.htaccess", "/static/app.js%00.png", "/static/app.js%0a",
-                     "/static/", "/static/app", "/store.py", "/laneboard/store.py", "/%2e%2e/%2e%2e/LICENSE",
-                     "//evil.example/x", "/static/con.js", "/static/aux", "/static//app.js",
-                     "/static/APP.JS", "/static/__init__.py"):
+                     "/static/....//store.py", "/static/.htaccess", "/static/main.js%00.png", "/static/main.js%0a",
+                     "/static/", "/static/main", "/store.py", "/laneboard/store.py", "/%2e%2e/%2e%2e/LICENSE",
+                     "//evil.example/x", "/static/con.js", "/static/aux", "/static//main.js",
+                     "/static/MAIN.JS", "/static/__init__.py"):
             status, body, _ = self.request("GET", path)
             self.assertEqual(status, 404, path)
             self.assertNotIn(b"import", body if isinstance(body, bytes) else b"", path)

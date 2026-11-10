@@ -72,7 +72,7 @@ jobs:
 | `laneboard/server.py` | HTTP, the JSON API and the request checks |
 | `laneboard/cli.py` | The command line |
 | `laneboard/samples/` | Example boards |
-| `laneboard/static/` | The page: one script, one stylesheet, no build step |
+| `laneboard/static/` | The page: JavaScript modules in one flat folder (`main.js` loads first, and each module starts by saying what it holds), one stylesheet, no build step |
 
 `Store` never edits a board it has handed out: each change works on a copy and swaps it in once saved.
 The page sends each change with the board's revision, and the server refuses it if the board has moved
@@ -80,4 +80,4 @@ on, so nothing gets overwritten unseen.
 
 To change the file format, raise `SCHEMA_VERSION` and add a step to `UPGRADES` in `schema.py`, plus a
 test with a file in the old format. Raise `__version__` in `laneboard/__init__.py` and `APP_VERSION` in
-`laneboard/static/app.js` together (a test checks they match), and add to `CHANGELOG.md`.
+`laneboard/static/state.js` together (a test checks they match), and add to `CHANGELOG.md`.
