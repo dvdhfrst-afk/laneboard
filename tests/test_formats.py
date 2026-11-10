@@ -4,13 +4,14 @@ import copy
 import json
 import os
 import tempfile
+import time
 import unittest
 from html.parser import HTMLParser
 
 from laneboard import formats, samples
 from laneboard.formats import common, github, htmlpage, markdown, native, plaintext, trello
 from laneboard.properties import clean_definitions
-from laneboard.schema import MAX_COLUMNS, MAX_NAME, MAX_TITLE, SCHEMA_VERSION, StoreError
+from laneboard.schema import MAX_CARDS, MAX_COLUMNS, MAX_NAME, MAX_TITLE, SCHEMA_VERSION, StoreError
 from laneboard.store import Store, encode_data
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -370,6 +371,35 @@ class Limits(unittest.TestCase):
                          f"That Markdown file has {MAX_COLUMNS + 1} headings, and a board can have at most "
                          f"{MAX_COLUMNS} columns. Join some of the headings together and try again.")
 
+    def assertQuick(self, call, *args):
+        """Hostile files take time in proportion to their size. The cases below took minutes before."""
+        start = time.perf_counter()
+        try:
+            call(*args)
+        except StoreError:
+            pass
+        self.assertLess(time.perf_counter() - start, 5)
+
+    def test_hostile_markdown_is_read_in_time(self):
+        spaces = " " * 200_000
+        for raw in (f"# a{spaces}b\n- A card\n", f"- A card\n# a{spaces}b #\n", f"## To do\n\n### T-1 a{spaces}b\n",
+                    "- A title\n" + "wrapped over many lines\n" * 200_000):
+            with self.subTest(raw[:20]):
+                self.assertQuick(markdown.import_, raw.encode())
+        result = markdown.import_(("- A title\n" + "wrapped over many lines\n" * 2_000).encode())
+        card = result.boards[0]["cards"][0]
+        self.assertEqual(len(card["title"]), MAX_TITLE)
+        self.assertEqual(card["notes"], ("A title" + " wrapped over many lines" * 2_000)[:20000].rstrip())
+        self.assertEqual(markdown.import_(b"- A card\n# Two  words  #  \n").boards[0]["columns"][0]["name"], "Two  words")
+
+    def test_too_many_cards_are_refused_before_they_are_all_read(self):
+        message = f"That Markdown file has more than {MAX_CARDS} cards, and a board can have at most {MAX_CARDS}."
+        for raw in (b"- a\n" * (MAX_CARDS + 1), b"## To do\n" + b"### T-1 a\n" * (MAX_CARDS + 1)):
+            with self.subTest(raw[:10]):
+                self.assertEqual(error(self, markdown.import_, raw), message)
+        self.assertEqual(len(markdown.import_(b"- a\n" * MAX_CARDS).boards[0]["cards"]), MAX_CARDS)
+        self.assertQuick(markdown.import_, b"- a\n" * 1_000_000)
+
     def test_too_many_tasks_and_labels(self):
         md = ("- Card\n" + "".join(f"  - [ ] Task {n}\n" for n in range(150))).encode()
         result = markdown.import_(md)
@@ -682,6 +712,16 @@ class HtmlExport(unittest.TestCase):
         self.assertNotIn("HTTPS://EXAMPLE.COM/UP", hrefs)  # as on the board, only lower case addresses become links
         self.assertIn('https://example.com/"onmouseover=alert(1)', hrefs)  # quote and all, inside the attribute
         self.assertNotIn(JS, hrefs)
+
+    def test_a_long_run_of_dots_after_a_link_is_quick(self):
+        board = rich_board()
+        dots = "See https://example.com/a" + "." * 19_970 + "x and https://example.com/b..."
+        board["cards"][1].update(notes=dots, sections=[{"label": f"Part {n}", "body": dots} for n in range(30)])
+        start = time.perf_counter()
+        html = htmlpage.export(board).decode("utf-8")
+        self.assertLess(time.perf_counter() - start, 5)  # it took 40 seconds
+        self.assertIn('<a href="https://example.com/b" rel="noopener noreferrer">https://example.com/b</a>...', html)
+        self.assertIn('rel="noopener noreferrer">https://example.com/a....', html)
 
     def test_a_page_that_stands_alone(self):
         html, page = self.parse(rich_board())

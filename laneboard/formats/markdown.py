@@ -68,8 +68,8 @@ import json
 import re
 
 from ..properties import TYPES, clean_definitions, find_property
-from ..schema import (KEY_RE, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT,
-                      StoreError)
+from ..schema import (KEY_RE, MAX_CARDS, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
+                      MAX_TEXT, StoreError)
 from .common import (Fitter, Format, ImportResult, Lookups, archived_cards, columns_with_cards, decode, plural,
                      read_json)
 
@@ -89,7 +89,7 @@ _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 _CLOSER = re.compile(r" {0,3}(`{3,}|~{3,})[ \t]*")
 _MARKER = re.compile(r"( {0,3})(\\*)(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})")
 _ESCAPED = re.compile(r"( {0,3})\\\\*(?:#{1,6}(?:[ \t]|$)|`{3,}|~{3,})")
-_HEADING = re.compile(r"(#{1,4})(?:[ \t]+(.*?))?[ \t]*")
+_HEADING = re.compile(r"(#{1,4})(?:[ \t]+(.*))?")  # matched against the line without its trailing spaces
 _META = re.compile(r"- (group|labels|blocked by|column|archived):(?: (.*))?", re.IGNORECASE)
 _TASK = re.compile(r"- \[([ xX])\](?: (.*))?")
 
@@ -101,6 +101,22 @@ _SYNTAX_LINE = re.compile(r"^(?: {0,3}#{1,6}[ \t]+\S|[ \t]*(?:[-*+]|[0-9]{1,9}[.
 
 def _starts(text, prefix):
     return text[:len(prefix)].casefold() == prefix
+
+
+def _too_many_cards():
+    return StoreError(f"That Markdown file has more than {MAX_CARDS} cards, and a board can have at most {MAX_CARDS}.")
+
+
+def _lines(text):
+    """The lines of `text` one at a time, so a huge file isn't split into a list of every line at once."""
+    start = 0
+    while True:
+        end = text.find("\n", start)
+        if end < 0:
+            yield text[start:]
+            return
+        yield text[start:end]
+        start = end + 1
 
 
 # ---- free text that can't break the layout -------------------------------------------------------
@@ -314,25 +330,27 @@ def _is_body(level, text):
 
 
 def _blocks(lines):
-    """[(heading level, heading text, lines under it)]. Level 0 holds anything before the first heading."""
-    blocks = [(0, "", [])]
+    """(heading level, heading text, lines under it) for each heading in turn, each one as soon as it ends.
+    Level 0 holds anything before the first heading."""
+    block = (0, "", [])
     fence, body = None, True
     for line in lines:
         if fence is not None:
-            blocks[-1][2].append(line)
+            block[2].append(line)
             if _closes(line, fence):
                 fence = None
             continue
-        m = _HEADING.fullmatch(line)
+        m = _HEADING.fullmatch(line.rstrip(" \t"))
         if m:
+            yield block
             level, text = len(m.group(1)), m.group(2) or ""
-            blocks.append((level, text, []))
+            block = (level, text, [])
             body = _is_body(level, text)
             continue
         if body:
             fence = _opens(line)
-        blocks[-1][2].append(line)
-    return blocks
+        block[2].append(line)
+    yield block
 
 
 def _body_text(lines):
@@ -450,7 +468,7 @@ def _read_laneboard(text):
     reader, warnings = _Reader(), []
     name, intro, headings, raw_cards, settings = None, [], [], [], None
     column, card = None, None
-    for level, heading, lines in _blocks(text.split("\n")):
+    for level, heading, lines in _blocks(_lines(text)):
         if level == 0 or (level == 1 and name is None):
             name = heading if level == 1 else name
             intro += lines
@@ -467,6 +485,8 @@ def _read_laneboard(text):
                 headings.append(column)
             reader.count_stray(lines)
         elif level == 3:
+            if len(raw_cards) == MAX_CARDS:
+                raise _too_many_cards()
             card = _new_card(heading, column)
             raw_cards.append(card)
             reader.head(card, lines)
@@ -575,11 +595,23 @@ def _finish_card(board, raw, checklists, first_column):
 
 # ---- import: a plain task list -------------------------------------------------------------------
 
-_ANY_HEADING = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*?))??(?:[ \t]+#+)?[ \t]*")
+_ANY_HEADING = re.compile(r" {0,3}(#{1,6})(?:[ \t]+(.*))?")
 _ITEM = re.compile(r"( *)([-*+]|[0-9]{1,9}[.)])(?:[ \t]+(.*))?")
 _CHECKBOX = re.compile(r"\[([ xX])\](?:[ \t]+(.*))?")
 _BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 _ANY_FENCE = re.compile(r" *(`{3,}|~{3,})(.*)")
+
+
+def _any_heading(line):
+    """(level, text) when the line is a heading, as in `## Text` or `## Text ##`; None when it isn't."""
+    m = _ANY_HEADING.fullmatch(line.rstrip(" \t"))
+    if not m:
+        return None
+    text = m.group(2) or ""
+    bare = text.rstrip("#")  # a closing run of #s, after a space or with nothing before it, isn't part of the text
+    if len(bare) < len(text) and (not bare or bare[-1] in " \t"):
+        text = bare.rstrip(" \t")
+    return len(m.group(1)), text
 
 
 def _read_plain(text):
@@ -592,7 +624,7 @@ def _read_plain(text):
         current["notes"] += [""] * current["gap"] + [line[min(indent, current["pad"]):]]
         current["gap"], current["open"] = 0, False
 
-    for line in text.split("\n"):
+    for line in _lines(text):
         line = line.expandtabs(4).rstrip()
         indent = len(line) - len(line.lstrip(" "))
         inside = current is not None and indent >= current["pad"]
@@ -618,12 +650,12 @@ def _read_plain(text):
             else:
                 stray, current = stray + 1, None
             continue
-        m = _ANY_HEADING.fullmatch(line)
-        if m:
-            if name is None and len(m.group(1)) == 1 and not headings and not items:
-                name = m.group(2) or ""
+        heading = _any_heading(line)
+        if heading:
+            if name is None and heading[0] == 1 and not headings and not items:
+                name = heading[1]
             else:
-                headings.append(m.group(2) or "")
+                headings.append(heading[1])
                 column = len(headings) - 1
             current = None
             continue
@@ -643,6 +675,8 @@ def _read_plain(text):
                     empty += 1
                 current["open"] = False
             elif rest:
+                if len(items) == MAX_CARDS:
+                    raise _too_many_cards()
                 current = {"title": rest, "done": done, "column": column, "tasks": [], "notes": [], "gap": 0,
                            "pad": indent + len(m.group(2)) + 1, "open": True}
                 items.append(current)
@@ -650,7 +684,8 @@ def _read_plain(text):
                 empty, current = empty + 1, None
             continue
         if current is not None and current["open"]:  # the item's text carries on, as a wrapped line does
-            current["title"] += " " + line.strip()
+            if len(current["title"]) <= MAX_TEXT:  # a long title goes into the notes, which can't hold more
+                current["title"] += " " + line.strip()
         elif inside:
             note(line)
         elif name is not None and not headings and not items:
