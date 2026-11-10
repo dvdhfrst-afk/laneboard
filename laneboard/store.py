@@ -306,7 +306,7 @@ class Store:
                 board["template"] = self._template(changes["template"])
             if "checklists" in changes:
                 board["checklists"] = self._checklists(changes["checklists"])
-                items = self._check_ids(board)
+                items = schema.tickable_ids(board)
                 board["cards"] = [c if all(i in items for i in c["checks"])
                                   else {**c, "checks": [i for i in c["checks"] if i in items]} for c in board["cards"]]
             # Settings last: the card face and the default view can name properties and views added in the same change.
@@ -389,7 +389,7 @@ class Store:
             draft = self._imported_parts(board, name)
         except StoreError as e:
             raise type(e)(f"{where}: {e}") from e
-        items = self._check_ids(draft)
+        items = schema.tickable_ids(draft)
         listed = board.get("labels") if isinstance(board.get("labels"), list) else []
         given_ids = {lab["id"] for lab in listed if isinstance(lab, dict) and isinstance(lab.get("id"), str)}
         given_ids &= {lab["id"] for lab in draft["labels"]}
@@ -656,7 +656,7 @@ class Store:
         def apply(board):
             if len(board["cards"]) >= MAX_CARDS:
                 raise Conflict(f"A board can have at most {MAX_CARDS} cards. Delete or move some first.")
-            card = self._new_card(board, values, self._check_ids(board))
+            card = self._new_card(board, values, schema.tickable_ids(board))
             self._check_room(board, card["column"])
             if card["rank"] is None:
                 card["rank"] = max((c["rank"] for c in board["cards"]), default=0) + 1
@@ -992,10 +992,6 @@ class Store:
         return out
 
     @staticmethod
-    def _check_ids(board):
-        return {i["id"] for cl in board["checklists"] for i in cl["items"] if not i["heading"]}
-
-    @staticmethod
     def _column_id(board, value):
         if not isinstance(value, str) or value not in {c["id"] for c in board["columns"]}:
             raise StoreError("That column doesn't exist on this board.")
@@ -1045,7 +1041,7 @@ class Store:
             checks = []
         if not isinstance(checks, list) or not all(isinstance(c, str) for c in checks):
             raise StoreError("Checks must be a list of checklist item ids.")
-        items = self._check_ids(board) if items is None else items
+        items = schema.tickable_ids(board) if items is None else items
         return [c for c in dict.fromkeys(checks) if c in items]  # drop ticks for lines that no longer exist
 
     def _new_card(self, board, values, items):

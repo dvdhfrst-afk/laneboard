@@ -10,11 +10,7 @@ from __future__ import annotations
 import math
 
 from .properties import TYPES
-
-
-def tickable_ids(board):
-    """Ids of the checklist lines a card can tick (headings can't be ticked)."""
-    return {item["id"] for cl in board.get("checklists") or [] for item in cl.get("items") or [] if not item.get("heading")}
+from .schema import tickable_ids
 
 
 def _whole(number):

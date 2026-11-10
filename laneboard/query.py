@@ -29,7 +29,7 @@ import unicodedata
 from fractions import Fraction
 
 from .properties import TYPES, _shown, find_property
-from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, key_sort
+from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, key_sort, tickable_ids
 
 MAX_DEPTH = 20   # parentheses inside parentheses
 
@@ -313,15 +313,10 @@ def _pick(options, given, pos, missing, noun):
     raise QueryError(missing, pos)
 
 
-def _tickable(board):
-    return {item.get("id") for cl in board.get("checklists") or [] for item in cl.get("items") or []
-            if not item.get("heading")}
-
-
 def _progress(board):
     """A function giving a card's progress as an exact percent: ticked checklist lines plus done tasks,
     out of the board's checklist lines plus the card's tasks. None when there is neither."""
-    tickable = _tickable(board)
+    tickable = tickable_ids(board)
     lines = len(tickable)
 
     def progress(card):
@@ -476,7 +471,7 @@ class _Compiler:
         if word == "tasks":
             return (lambda v: bool(v.card.get("tasks"))), 1
         if word == "checklist":  # the board's checklists are on every card
-            present = bool(_tickable(self.board))
+            present = bool(tickable_ids(self.board))
             return (lambda v: present), 0
         if word == "group":
             return (lambda v: v.card.get("group") is not None), 1
