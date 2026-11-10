@@ -43,6 +43,7 @@ export function render() {
   if (overview) {
     $("#groups").hidden = true;
     $("#welcome").hidden = true;
+    $("#summary").hidden = true;
     return;
   }
   renderSummary();
