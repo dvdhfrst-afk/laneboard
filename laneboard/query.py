@@ -29,9 +29,8 @@ import unicodedata
 from fractions import Fraction
 
 from .properties import TYPES, _shown, find_property
-from .schema import ANY_KEY_RE, MAX_DECIMALS, StoreError, key_sort
+from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, key_sort
 
-MAX_QUERY = 500  # characters in a search or a sort string, as in a saved view
 MAX_DEPTH = 20   # parentheses inside parentheses
 
 QUALIFIERS = ("column", "group", "label", "key", "title", "notes", "is", "has", "tasks", "progress", "sort")

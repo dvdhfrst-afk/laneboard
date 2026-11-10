@@ -3,11 +3,15 @@ import copy
 import json
 import os
 import re
+import tempfile
 import unittest
 
 from laneboard import properties as P
+from laneboard import query as Q
+from laneboard import schema
 from laneboard import templates as T
 from laneboard.schema import COLORS, BadFile, NotFound, StoreError, slug
+from laneboard.store import Store
 
 PARTS = ("group", "labels", "field", "progress", "blocked")
 TERM = re.compile(r'(?:^|[\s(])-?([A-Za-z][A-Za-z0-9-]*):("[^"]*"|[^\s)]+)')
@@ -403,6 +407,82 @@ class FileChecks(unittest.TestCase):
             T.check_template(plain_template(board={"columns": []}), "The boards file")
         self.assertNotIn("Traceback", str(caught.exception))
         self.assertEqual(caught.exception.status, 503)
+
+
+class OneSetOfLimits(unittest.TestCase):
+    """A template that passes the file check fits the store's limits, because both read them from the schema."""
+
+    def test_no_module_keeps_limits_of_its_own(self):
+        for module in (T, Q):
+            with open(module.__file__, encoding="utf-8") as f:
+                source = f.read()
+            local = re.findall(r"^(MAX_\w+|\w*FACE_PARTS|LIMIT_POLICIES) *=", source, re.M)
+            self.assertEqual([name for name in local if hasattr(schema, name) or "FACE" in name], [], module.__name__)
+
+    def test_the_longest_names_the_check_allows_make_a_board(self):
+        board = {"columns": [{"name": "C" * schema.MAX_COLUMN_NAME, "limit": schema.MAX_COLUMN_LIMIT}],
+                 "groupLabel": "L" * schema.MAX_GROUP_LABEL, "groups": [{"name": "G" * schema.MAX_GROUP_NAME}],
+                 "labels": [{"name": "B" * schema.MAX_LABEL_NAME}], "views": [{"name": "V" * schema.MAX_VIEW_NAME}],
+                 "template": ["S" * schema.MAX_SECTION_NAME],
+                 "checklists": [{"name": "K" * schema.MAX_CHECKLIST_NAME, "items": [{"text": "x" * schema.MAX_CHECK_TEXT}]}]}
+        template = plain_template(board=board)
+        T.check_template(template, "The boards file")
+        with tempfile.TemporaryDirectory() as tmp:
+            made = Store(os.path.join(tmp, "boards.json"), starter=False).import_board(T.board_from_template(template))
+        self.assertEqual(made["columns"][0]["name"], "C" * schema.MAX_COLUMN_NAME)
+
+    def test_one_more_is_refused_by_the_check(self):
+        for part, value in (("columns", [{"name": "C" * (schema.MAX_COLUMN_NAME + 1)}]),
+                            ("columns", [{"name": "C", "limit": schema.MAX_COLUMN_LIMIT + 1}]),
+                            ("groupLabel", "L" * (schema.MAX_GROUP_LABEL + 1)),
+                            ("groups", [{"name": "G" * (schema.MAX_GROUP_NAME + 1)}]),
+                            ("groups", [{"name": "G", "link": "example.com"}]),
+                            ("template", ["S" * (schema.MAX_SECTION_NAME + 1)]),
+                            ("checklists", [{"name": "K" * (schema.MAX_CHECKLIST_NAME + 1)}]),
+                            ("checklists", [{"name": "K", "items": [{"text": "x" * (schema.MAX_CHECK_TEXT + 1)}]}]),
+                            ("views", [{"name": "V", "sort": "x" * (schema.MAX_SORT + 1)}])):
+            board = {"columns": [{"name": "A", "limit": None}], part: value}
+            with self.subTest(part=part, value=str(value)[:40]):
+                refused(self, plain_template(board=board), "'Mine'")
+
+
+class SavedInTheFile(unittest.TestCase):
+    """Saved templates in a boards file get the full check when the file loads, as boards do."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, "boards.json")
+
+    def write(self, templates):
+        data = {"version": 3, "boards": [{"id": "b1", "name": "Work", "columns": [{"id": "a", "name": "A"}], "cards": []}],
+                "templates": templates}
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with open(self.path, "rb") as f:
+            return f.read()
+
+    def refused(self, templates, *phrases):
+        raw = self.write(templates)
+        with self.assertRaises(BadFile) as caught:
+            Store(self.path)
+        for phrase in phrases:
+            self.assertIn(phrase, str(caught.exception))
+        self.assertIn("Your file was not changed", str(caught.exception))
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), raw)
+
+    def test_a_good_one_loads_with_its_defaults(self):
+        self.write([plain_template(board={"columns": [{"name": "A"}]})])
+        saved = Store(self.path).all_data()["templates"][0]
+        self.assertEqual((saved["board"]["prefix"], saved["board"]["columns"][0]["limit"], saved["board"]["labels"]), ("T", None, []))
+
+    def test_bad_ones_are_refused_naming_the_template(self):
+        self.refused([plain_template(board={"columns": [{"name": "A"}], "properties": [{"name": "P", "type": "colour"}]})],
+                     "template 'Mine'", 'no property type called "colour"')
+        self.refused([plain_template(cards=[{"title": "Card", "column": "Nowhere"}])], "template 'Mine', card 'Card'")
+        self.refused([plain_template(id="basic")], "belongs to a built-in template")
+        self.refused([plain_template(), plain_template(id="other", name="MINE")], "two templates are named 'MINE'")
 
 
 class FromBoard(unittest.TestCase):

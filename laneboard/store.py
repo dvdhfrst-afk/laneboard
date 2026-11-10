@@ -19,9 +19,11 @@ from . import schema, storage
 from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
                      CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
-                     MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECKLISTS, MAX_COLUMNS, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
-                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT, MAX_TITLE,
-                     MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort, now, rows, slug, text)
+                     MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
+                     MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
+                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
+                     MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort,
+                     now, rows, slug, text)
 
 DEFAULT_COLUMNS = [("Backlog", None), ("Ready", None), ("In progress", 1), ("Review", None), ("Done", None)]
 
@@ -261,7 +263,7 @@ class Store:
             if "prefix" in changes:
                 board["prefix"] = self._prefix(changes["prefix"], "The board's key prefix")
             if "groupLabel" in changes:
-                board["groupLabel"] = text(changes["groupLabel"], "Group label", 30, required=True)
+                board["groupLabel"] = text(changes["groupLabel"], "Group label", MAX_GROUP_LABEL, required=True)
             if "columns" in changes:
                 self._apply_columns(board, changes["columns"], changes.get("moveCards"))
             if "groups" in changes:
@@ -405,7 +407,7 @@ class Store:
         if board.get("prefix") is not None:
             draft["prefix"] = self._prefix(board["prefix"], "The board's key prefix")
         if board.get("groupLabel") is not None:
-            draft["groupLabel"] = text(board["groupLabel"], "Group label", 30, required=True)
+            draft["groupLabel"] = text(board["groupLabel"], "Group label", MAX_GROUP_LABEL, required=True)
         columns = board.get("columns")
         if columns:
             if isinstance(columns, list):  # a hand-written file may list just the names
@@ -670,15 +672,15 @@ class Store:
         for col in columns:
             if not isinstance(col, dict):
                 raise StoreError("Each column needs a name.")
-            name = text(col.get("name"), "Column name", 40, required=True)
+            name = text(col.get("name"), "Column name", MAX_COLUMN_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two columns named {name}.")
             names.add(name.lower())
             limit = col.get("limit")
             if limit in ("", None):
                 limit = None
-            elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 999:
-                raise StoreError(f"The limit for {name} must be a whole number from 1 to 999, or empty.")
+            elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_COLUMN_LIMIT:
+                raise StoreError(f"The limit for {name} must be a whole number from 1 to {MAX_COLUMN_LIMIT}, or empty.")
             cid = col.get("id")
             if not usable(cid) or (cid not in existing and cid in taken):
                 cid = slug(name, taken)
@@ -735,7 +737,7 @@ class Store:
         for g in groups:
             if not isinstance(g, dict):
                 raise StoreError("Each group needs a name.")
-            name = text(g.get("name"), "Group name", 60, required=True)
+            name = text(g.get("name"), "Group name", MAX_GROUP_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two groups named {name}.")
             names.add(name.lower())
@@ -777,7 +779,7 @@ class Store:
             raise StoreError(f"A new card can start with at most {MAX_ROWS} sections.")
         out = []
         for name in names:
-            name = text(name, "A new card section name", 60, required=True)
+            name = text(name, "A new card section name", MAX_SECTION_NAME, required=True)
             if name.lower() in (n.lower() for n in out):
                 raise StoreError(f"{name} is listed twice in new card sections.")
             out.append(name)
@@ -802,7 +804,7 @@ class Store:
         for cl in checklists:
             if not isinstance(cl, dict):
                 raise StoreError("Each checklist needs a name.")
-            name = text(cl.get("name"), "Checklist name", 60, required=True)
+            name = text(cl.get("name"), "Checklist name", MAX_CHECKLIST_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two checklists named {name}.")
             names.add(name.lower())
@@ -816,7 +818,7 @@ class Store:
                 if not isinstance(item, dict):
                     raise StoreError(f"Each line in {name} needs text.")
                 lines.append({"id": new_id(item.get("id"), lambda: "i" + secrets.token_hex(4)),
-                              "text": text(item.get("text"), f"A line in {name}", 500, required=True),
+                              "text": text(item.get("text"), f"A line in {name}", MAX_CHECK_TEXT, required=True),
                               "heading": bool(item.get("heading"))})
             out.append({"id": new_id(cl.get("id"), lambda: slug(name, taken)), "name": name, "items": lines})
         return out
