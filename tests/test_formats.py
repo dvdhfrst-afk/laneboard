@@ -155,10 +155,10 @@ def rich_board():
 
 def expected_import(board):
     """The import shape that reading a Markdown export of `board` must give back: every part of the
-    board's structure as stored, and each card's content, with columns, groups and labels by name."""
+    board's structure as stored, and each card's content, with columns and groups by name. Labels, like property
+    values and ticks, come back by the ids the Board settings part gives them, since a label's name can be another's id."""
     columns = {c["id"]: c["name"] for c in board["columns"]}
     groups = {g["id"]: g["name"] for g in board.get("groups") or []}
-    labels = {lab["id"]: lab["name"] for lab in board.get("labels") or []}
     out = {"name": board["name"], "description": board.get("description", ""), "properties": board.get("properties") or []}
     out.update({key: board[key] for key in markdown.STRUCTURE if key in board})
     cards = {}
@@ -169,7 +169,7 @@ def expected_import(board):
         if c.get("group"):
             made["group"] = groups[c["group"]]
         if c.get("labels"):
-            made["labels"] = [labels[i] for i in c["labels"]]
+            made["labels"] = list(c["labels"])
         for part in ("blocked", "summary", "fields", "sections", "notes"):
             if c.get(part):
                 made[part] = c[part]
@@ -456,6 +456,21 @@ class MarkdownRoundTrip(unittest.TestCase):
         for key, want in want_cards.items():
             self.assertEqual(got_cards[key], want, key)
         return raw, result
+
+    def test_a_label_named_like_another_labels_id(self):
+        # "json>" was made first, so it has the id json; the label called json has json-2.
+        board = {"name": "Labels", "labels": [{"id": "json", "name": "json>", "color": "blue"}, {"id": "json-2", "name": "json", "color": "teal"}],
+                 "cards": [{"key": "T-1", "title": "A", "labels": ["json", "json-2"]}, {"key": "T-2", "title": "B", "labels": ["json-2"]}]}
+        with TempStore() as store:
+            made = store.import_board(board)
+            self.check(made)
+            again = store.import_boards(markdown.import_(markdown.export(made)).boards, preview=True)[0]
+            self.assertEqual([c["labels"] for c in again["cards"]], [["json", "json-2"], ["json-2"]])
+            # Without the Board settings part the labels are made from the names, and each card keeps its own.
+            plain = b"# B\n\n## To do\n\n### T-1 A\n\n- Labels: json>, json\n\n### T-2 B\n\n- Labels: json\n"
+            again = store.import_boards(markdown.import_(plain).boards, preview=True)[0]
+            names = {lab["id"]: lab["name"] for lab in again["labels"]}
+            self.assertEqual([[names[i] for i in c["labels"]] for c in again["cards"]], [["json>", "json"], ["json"]])
 
     def test_a_board_with_every_part(self):
         raw, result = self.check(rich_board())

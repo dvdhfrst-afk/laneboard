@@ -68,7 +68,7 @@ import json
 import re
 
 from ..properties import TYPES, clean_definitions, find_property
-from ..schema import (KEY_RE, MAX_CARDS, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
+from ..schema import (ID_RE, KEY_RE, MAX_CARDS, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
                       MAX_TEXT, StoreError)
 from .common import (Fitter, Format, ImportResult, Lookups, archived_cards, columns_with_cards, decode, plural,
                      read_json)
@@ -539,6 +539,17 @@ def _read_laneboard(text):
     return ImportResult([board], warnings)
 
 
+def _label_id(board, name):
+    """A card's label, by the id the Board settings part gives the label with that name. The card names it, and
+    a name can be another label's id ("json" beside "json>", whose id is json)."""
+    labels = board.get("labels")
+    folded = name.casefold()
+    for lab in labels if isinstance(labels, list) else ():
+        if isinstance(lab, dict) and isinstance(lab.get("id"), str) and ID_RE.fullmatch(lab["id"])                 and isinstance(lab.get("name"), str) and lab["name"].strip().casefold() == folded:
+            return lab["id"]
+    return name
+
+
 def _finish_card(board, raw, checklists, first_column):
     meta = raw["meta"]
     where = f"Card {raw['key'] or repr(raw['title'])}"
@@ -553,7 +564,7 @@ def _finish_card(board, raw, checklists, first_column):
     if meta.get("group"):
         card["group"] = meta["group"]
     if meta.get("labels"):
-        card["labels"] = _split_names(meta["labels"])
+        card["labels"] = [_label_id(board, name) for name in _split_names(meta["labels"])]
     if meta.get("blocked by"):
         card["blocked"] = meta["blocked by"]
     for part in ("summary", "fields", "tasks", "sections"):

@@ -242,6 +242,18 @@ class FieldUpdateTest(Case):
 
 
 class ImportTest(Case):
+    def test_a_card_label_named_like_another_labels_made_up_id_is_the_one_named(self):
+        # "Front end" gets the id front-end, so "front-end" itself gets front-end-2. A file that gave no ids means names.
+        def named(board):
+            return [[lab["name"] for lab in board["labels"] if lab["id"] in c["labels"]] for c in board["cards"]]
+        made = self.store.import_board({"name": "Names", "labels": [{"name": "Front end"}, {"name": "front-end"}],
+                                        "cards": [{"title": "A", "labels": ["front-end"]}, {"title": "B", "labels": ["Front end"]}]})
+        self.assertEqual(named(made), [["front-end"], ["Front end"]])
+        # A file that gave its labels ids, as an export does, means those ids.
+        made = self.store.import_board({"name": "Ids", "labels": [{"id": "json", "name": "json>"}, {"id": "json-2", "name": "json"}],
+                                        "cards": [{"title": "A", "labels": ["json"]}, {"title": "B", "labels": ["json-2"]}]})
+        self.assertEqual(named(made), [["json>"], ["json"]])
+
     def test_an_export_comes_back_exactly_after_renames(self):
         board = self.store.update_board(self.board, {"groups": [{"name": "Website", "prefix": "WEB", "color": "teal"}]})
         cols = board["columns"] + [{"name": "Parked", "limit": None}]

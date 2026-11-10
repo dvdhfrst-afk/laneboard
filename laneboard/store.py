@@ -390,6 +390,10 @@ class Store:
         except StoreError as e:
             raise type(e)(f"{where}: {e}") from e
         items = self._check_ids(draft)
+        listed = board.get("labels") if isinstance(board.get("labels"), list) else []
+        given_ids = {lab["id"] for lab in listed if isinstance(lab, dict) and isinstance(lab.get("id"), str)}
+        given_ids &= {lab["id"] for lab in draft["labels"]}
+        made_ids = {lab["id"] for lab in draft["labels"]} - given_ids
         column_names = {c["name"].lower(): c["id"] for c in draft["columns"]}
         group_names = {g["name"].lower(): g["id"] for g in draft["groups"]}
         seen, top_rank, built = set(), 0, []
@@ -406,7 +410,7 @@ class Store:
                 if values.get("rank") is None:
                     values["rank"] = top_rank + 1
                 if "labels" in values:
-                    values["labels"] = self._imported_labels(draft, values["labels"])
+                    values["labels"] = self._imported_labels(draft, values["labels"], given_ids, made_ids)
                 if "properties" in values:
                     values["properties"] = self._imported_values(draft, values["properties"], typed)
                 card = self._new_card(draft, values, items)
@@ -494,15 +498,30 @@ class Store:
                     draft["counters"][prefix] = number
         return draft
 
-    def _imported_labels(self, draft, value):
-        """Card labels from an import, by id or name. A name the board doesn't have yet becomes a new label."""
+    def _imported_labels(self, draft, value, given_ids, made_ids):
+        """Card labels from an import, by id or name. A name the board doesn't have yet becomes a new label.
+
+        An id the file gave a label comes first, then a label's name, then an id made up for a label the file
+        listed without one: the file can't mean a made-up id over a name, so "front-end" beside "Front end"
+        (whose made-up id is front-end) is the label called front-end."""
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise StoreError("Labels must be a list of label names or ids.")
-        for given in value:
+
+        def meant(given):
+            if given in given_ids:
+                return given
             wanted = given.strip().casefold()
-            if not any(lab["id"] == given or lab["name"].casefold() == wanted for lab in draft["labels"]):
+            named = next((lab["id"] for lab in draft["labels"] if lab["name"].casefold() == wanted), None)
+            return named if named is not None or given not in made_ids else given
+
+        picked = []
+        for given in value:
+            found = meant(given)
+            if found is None:
                 draft["labels"] = self._labels(draft, draft["labels"] + [{"name": given}], keep_ids=True)
-        return self._card_labels(draft, value)
+                found = meant(given)
+            picked.append(given if found is None else found)
+        return self._card_labels(draft, picked)
 
     @staticmethod
     def _imported_values(draft, value, typed=False):
