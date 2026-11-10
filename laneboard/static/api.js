@@ -7,10 +7,14 @@ import { saveDrafts } from "./card.js";
 
 // An error carries the HTTP status (0 when the server can't be reached) and the whole answer as `detail`, which for
 // a search the server can't read says where it stopped. `signal` can cancel a request that's no longer wanted; a
-// cancelled one rejects with an AbortError and says nothing about the server being gone.
+// cancelled one rejects with an AbortError and says nothing about the server being gone. A file (a Blob) is sent as
+// it is, for the server to read.
 export async function api(method, path, body, rev, signal) {
   const opts = { method, headers: {}, signal };
-  if (body !== undefined) {
+  if (body instanceof Blob) {
+    opts.headers["Content-Type"] = "application/octet-stream";
+    opts.body = body;
+  } else if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = typeof body === "string" ? body : JSON.stringify(body);
   }

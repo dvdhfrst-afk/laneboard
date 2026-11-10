@@ -8,6 +8,7 @@ import { renderPicker, showBoard } from "./board.js";
 import { bindMenu, closeMenu, openMenu, renderMenu } from "./menu.js";
 import { bindSearch } from "./search.js";
 import { bindSort } from "./views.js";
+import { bindSummary } from "./summary.js";
 import { bindDrag, shiftCard, shiftColumn } from "./move.js";
 import { openCardForm } from "./cardform.js";
 import { openNewBoard, openSettings } from "./settings.js";
@@ -142,6 +143,7 @@ function bindPage() {
   bindImport();
   bindSearch();
   bindSort();
+  bindSummary();
   bindMenu();
   window.addEventListener("hashchange", route);
   window.addEventListener("focus", refresh);

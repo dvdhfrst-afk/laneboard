@@ -4,24 +4,27 @@ import { index, state } from "./state.js";
 import { $, h } from "./dom.js";
 import { openArchive } from "./archive.js";
 import { duplicateBoard } from "./settings.js";
-import { chooseImportFile } from "./transfer.js";
+import { exportLinks, formats, loadFormats, openImport } from "./transfer.js";
 import { openHelp } from "./help.js";
 import { openSaveTemplate, openTemplates } from "./templates.js";
 
 export function renderMenu() {
   const b = state.board;
   const item = (label, run, disabled) => h("button", { type: "button", text: label, disabled, onclick: () => { closeMenu(); run(); } });
-  const link = (label, href) => h("a", { href, download: "", text: label, onclick: closeMenu });
+  // A download: the server names the file and sends it as an attachment, so the page never shows it.
+  const link = (label, href, extension) => h("a", { href, download: "", class: "menu-file", onclick: closeMenu },
+    h("span", { text: label }), extension && h("span", { class: "hint", text: extension }));
+  if (!formats.length) loadFormats().then((list) => { if (list.length) renderMenu(); });
   const boardItems = b ? [
     item(`Archived cards (${index.archived.length})`, openArchive),
-    link("Export this board", `/api/boards/${b.id}/export`),
+    ...exportLinks(b, link),
     item("Duplicate this board", duplicateBoard),
     item("Save as template", openSaveTemplate),
   ] : [];
   $("#menu-items").replaceChildren(...boardItems,
     item("Templates", openTemplates),
-    link("Export all boards", "/api/export"),
-    item("Import a file", chooseImportFile),
+    link("Export all boards", "/api/export", ".json"),
+    item("Import a file", openImport),
     item("Keyboard shortcuts and help", openHelp));
 }
 
