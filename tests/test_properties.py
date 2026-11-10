@@ -542,6 +542,11 @@ class FindAndText(unittest.TestCase):
         self.assertEqual(P.find_property(renamed, "story-points")["name"], "Effort")
         self.assertEqual(P.find_property(renamed, "Story points")["id"], "story-points-2")
         self.assertEqual(P.find_property(renamed, "effort")["id"], "story-points")
+        # What a person types: the name wins, and an id still finds a property no name matches.
+        self.assertEqual(P.find_property(renamed, "story-points", names_first=True)["id"], "story-points-2")
+        self.assertEqual(P.find_property(renamed, "effort", names_first=True)["id"], "story-points")
+        self.assertEqual(P.find_property(self.board, "story-points", names_first=True)["name"], "Story points")
+        self.assertIsNone(P.find_property(renamed, " - ", names_first=True))
 
     def test_property_text(self):
         first, second = self.board["cards"]

@@ -101,9 +101,19 @@ def already_serving(args, error):
     return 0
 
 
+def by_name(items, ref):
+    """The items whose name is `ref` ignoring case, or else the one whose id is exactly `ref`.
+
+    What people type is a name, and a name can be another item's id: a label called "front-end" beside one
+    called "Front end", whose id is front-end. So a name wins, and an id is the way to reach an item whose
+    name is shared."""
+    wanted = ref.strip().casefold()
+    return [i for i in items if i["name"].strip().casefold() == wanted] or [i for i in items if i["id"] == ref]
+
+
 def find_board(store, ref):
     boards = store.list_boards()
-    matches = [b for b in boards if b["id"] == ref] or [b for b in boards if b["name"].lower() == ref.lower()]
+    matches = by_name(boards, ref)
     if not matches:
         names = ", ".join(b["name"] for b in boards) or "none yet"
         raise NotFound(f"There's no board called {ref!r}. Boards: {names}.")
@@ -114,11 +124,23 @@ def find_board(store, ref):
 
 
 def find_named(items, ref, what, board):
-    match = next((i for i in items if i["id"] == ref), None) or next((i for i in items if i["name"].lower() == ref.lower()), None)
+    match = next(iter(by_name(items, ref)), None)
     if match is None:
         names = ", ".join(i["name"] for i in items) or "none"
         raise NotFound(f"{board['name']} has no {what} called {ref!r}. It has: {names}.")
     return match["id"]
+
+
+def named_id(items, ref):
+    """The id of the item `ref` names (see `by_name`), or `ref` as typed when none does, for the store to say what's
+    there."""
+    found = by_name(items, ref)
+    return found[0]["id"] if found else ref
+
+
+def find_template(store, ref):
+    """A template by name, built-in or saved, or else by id."""
+    return get_template(store.saved_templates(), named_id(store.list_templates(), ref))
 
 
 def read_file(name):
@@ -294,7 +316,7 @@ def card_of(board, key):
 
 
 def property_named(board, name):
-    prop = find_property(board, name)
+    prop = find_property(board, name, names_first=True)
     if prop is None:
         names = ", ".join(p["name"] for p in board["properties"]) or "none"
         raise NotFound(f"{board['name']} has no property called {name!r}. It has: {names}.")
@@ -465,7 +487,8 @@ def cmd_task(args):
 def cmd_transfer(args):
     store = Store(args.data, starter=False)
     source, target = find_board(store, args.board), find_board(store, args.target)
-    done = store.transfer_card(source, args.key, target, args.column)
+    column = named_id(store.get_board(target)["columns"], args.column) if args.column else None
+    done = store.transfer_card(source, args.key, target, column)
     card = card_of(done["target"], done["key"])
     column = next(c["name"] for c in done["target"]["columns"] if c["id"] == card["column"])
     print(f"Moved {args.key} to {done['target']['name']} as {done['key']}, in {column}.")
@@ -486,11 +509,11 @@ def split_pair(given, option, shape, parser):
 
 def cmd_new(args):
     store = Store(args.data, starter=False)  # the new board is the first thing in a new file
-    board = store.create_board(args.name, args.description, template=args.template)
-    if args.template is None:
+    template = None if args.template is None else find_template(store, args.template)
+    board = store.create_board(args.name, args.description, template=template and template["id"])
+    if template is None:
         print(f"Added {board['name']} as {board['id']}.")
         return
-    template = get_template(store.saved_templates(), args.template)
     cards = count(len(board["cards"]), "card") if board["cards"] else "no cards"
     print(f"Added {board['name']} as {board['id']}, from the template {template['name']}, with {cards}.")
 
@@ -513,7 +536,7 @@ def cmd_templates(args):
     elif args.action == "delete":
         if not args.yes:
             args.parser.error("deleting a template can't be undone except by restoring a backup; add --yes to delete it")
-        template = get_template(store.saved_templates(), args.name)
+        template = find_template(store, args.name)
         store.delete_template(template["id"])
         print(f"Deleted the template {template['name']}.")
     elif args.json:
@@ -634,9 +657,19 @@ def view_trouble(view, error):
     return f"the saved view \"{view['name']}\" doesn't work any more: {error}"
 
 
-def default_view(given):
-    """--default NAME: a saved view by name or id, or none for no default view."""
-    return None if given.strip().lower() == "none" else given
+def default_view(board, given):
+    """--default NAME: a saved view by name first, then id, or none for no default view. One that isn't there goes
+    to the store as typed, which lists the views there are."""
+    return None if given.strip().lower() == "none" else named_id(board["views"], given)
+
+
+def face_part(board, given):
+    """What --card-face names: a part of a card, or a property by name first. Anything else goes to the store as typed,
+    which says what a card can show."""
+    if given.lower() in CARD_FACE_PARTS:
+        return given
+    prop = find_property(board, given, names_first=True)
+    return prop["id"] if prop else given
 
 
 def opens_with(board):
@@ -667,7 +700,7 @@ def cmd_views(args):
         if args.remove is not None or args.add is not None:
             changes["views"] = views
         if args.default is not None:
-            changes["settings"] = {"defaultView": default_view(args.default)}
+            changes["settings"] = {"defaultView": default_view(board, args.default)}
         updated = store.update_board(board["id"], changes, rev=board["rev"])
         if args.default is not None:
             said.append(opens_with(updated))
@@ -695,19 +728,20 @@ LIMIT_POLICY_WORDS = {"warn": "warn (a column over its limit is flagged)", "refu
 
 def cmd_settings(args):
     store = Store(args.data, starter=False)
-    board_id = find_board(store, args.board)
+    board = store.get_board(find_board(store, args.board))
     changes = {key: value for key, value in (("name", args.name), ("description", args.description), ("prefix", args.prefix))
                if value is not None}
     settings = {}
     if args.limit_policy:
         settings["limitPolicy"] = args.limit_policy
     if args.card_face is not None:
-        settings["cardFace"] = [part.strip() for part in args.card_face.split(",") if part.strip()]
+        settings["cardFace"] = [face_part(board, part.strip()) for part in args.card_face.split(",") if part.strip()]
     if args.default is not None:
-        settings["defaultView"] = default_view(args.default)
+        settings["defaultView"] = default_view(board, args.default)
     if settings:
         changes["settings"] = settings
-    board = store.update_board(board_id, changes) if changes else store.get_board(board_id)
+    if changes:
+        board = store.update_board(board["id"], changes)
     names = {p["id"]: p["name"] for p in board["properties"]}
     views = {v["id"]: v["name"] for v in board["views"]}
     face = ", ".join(names.get(part, part) for part in board["settings"]["cardFace"]) or "(only the title)"
