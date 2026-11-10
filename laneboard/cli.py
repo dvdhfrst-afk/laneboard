@@ -861,6 +861,15 @@ def cmd_check(args):
         print(f"Warning: on {board['name']}, {view_trouble(view, error)}")
     if broken:
         print("Those views are kept as they are. Change or remove them with laneboard views.")
+    troubles = store.template_troubles()
+    for template, view, error in troubles:
+        if view is None:
+            print(f"Warning: the template {template['name']} can't make a board: {error}")
+        else:
+            print(f"Warning: the template {template['name']} has a saved view \"{view['name']}\" that doesn't work: {error}")
+    if troubles:
+        print("No board can be made from those templates as they are. Fix them in the file, or delete them with "
+              "laneboard templates delete.")
     print("OK")
 
 

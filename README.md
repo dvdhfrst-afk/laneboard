@@ -255,7 +255,7 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard sample [NAME]` | List the example boards, or add one |
 | `laneboard backups` | List the copies you can go back to |
 | `laneboard restore NAME` | Go back to one |
-| `laneboard check` | Check that the file can be read, without changing it. Saved views that no longer work are listed as warnings |
+| `laneboard check` | Check that the file can be read, without changing it. Saved views that no longer work, and saved templates that couldn't make a board, are listed as warnings |
 
 `--label`, `--unlabel`, `--set`, `--clear` and the `task` options can be given more than once. A value
 that starts with `-`, like a sort, goes after an `=`: `--sort=-points`.

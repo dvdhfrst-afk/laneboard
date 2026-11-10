@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 from . import schema, storage
 from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
-from .query import QueryError, prepare
+from .query import QueryError, broken_views, prepare
 from .templates import (BUILTIN_IDS, board_from_template, builtin_templates, describe, find_template, get_template,
                         template_from_board)
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
@@ -367,11 +367,12 @@ class Store:
         self._add_boards([made])
         return made
 
-    def _imported_board(self, board, number=None):
+    def _imported_board(self, board, number=None, check_views=True):
         """Build a board from untrusted JSON. Everything is validated; only known fields are kept.
 
         Takes the loose import shape (see docs/file-format.md) as well as a board exactly as exported.
         `number` is the board's place in a file of several. Errors name the board, and the card and part.
+        Without `check_views`, saved views that don't work are kept for the caller to look at.
         """
         label = f"Board number {number}" if number else None
         try:
@@ -439,7 +440,8 @@ class Store:
                 seen.add(card["key"])
         draft["cards"] = built
         try:
-            self._check_views(draft)  # with the cards in: a label a card brought can be in a view
+            if check_views:
+                self._check_views(draft)  # with the cards in: a label a card brought can be in a view
             self._check_limits(draft, {c["id"] for c in draft["columns"]})
         except QueryError as e:  # a plain error: an import has no search box to point into
             raise StoreError(f"{where}: {e}") from e
@@ -548,8 +550,35 @@ class Store:
                 raise Conflict(f"A file can hold at most {MAX_TEMPLATES} saved templates. Delete one you don't use first.")
             template = template_from_board(board, name, description, include_cards=cards, taken_ids=[t["id"] for t in saved])
             self._unique_template_name(template["name"], saved)
+            try:  # a view can work on the board and not on a new one: one naming a renamed property by its old id
+                _, broken = self._template_board(template)
+            except StoreError as e:
+                raise StoreError(f"That board can't be saved as a template, because a board made from it would be "
+                                 f"refused. {e}") from e
+            if broken:
+                view, error = broken[0]
+                raise StoreError(f"That board can't be saved as a template: its saved view \"{_shown(view['name'])}\" "
+                                 f"wouldn't work on a board made from it. {error} Change that view first.")
             self._save({**self.data, "templates": saved + [template]})
         return template
+
+    def _template_board(self, template):
+        """The board a template makes, checked as an import is but with its views not yet read: (board, broken views)."""
+        draft = self._imported_board(board_from_template(template), check_views=False)
+        return draft, broken_views(draft)
+
+    def template_troubles(self):
+        """Saved templates that wouldn't make a working board, for `laneboard check`: [(template, view, error)].
+        `view` is the saved view that doesn't work, or None when the template can't make a board at all."""
+        found = []
+        for template in self.saved_templates():
+            try:
+                _, broken = self._template_board(template)
+            except StoreError as e:
+                found.append((template, None, e))
+                continue
+            found += [(template, view, error) for view, error in broken]
+        return found
 
     def update_template(self, template_id, changes):
         """Rename a saved template or change its description. Built-in templates can't be changed."""
