@@ -37,6 +37,7 @@ INTERNAL_ERROR = ("Laneboard hit an internal error and this request didn't finis
                   "was saved. The terminal running Laneboard has the details.")
 BOARD = r"(?P<board>[\w-]+)"
 KEY = r"(?P<key>[A-Z][A-Z0-9]*-\d+)"
+TASK = r"(?P<task>[a-z0-9][a-z0-9-]{0,39})"
 
 ROUTES = [
     ("GET", re.compile(r"/api/health"), "health"),
@@ -53,6 +54,10 @@ ROUTES = [
     ("POST", re.compile(rf"/api/boards/{BOARD}/cards"), "create_card"),
     ("PATCH", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "update_card"),
     ("DELETE", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "delete_card"),
+    ("POST", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}/tasks"), "add_task"),
+    ("PATCH", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}/tasks/{TASK}"), "update_task"),
+    ("DELETE", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}/tasks/{TASK}"), "delete_task"),
+    ("POST", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}/transfer"), "transfer_card"),
 ]
 
 
@@ -234,6 +239,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_delete_card(self, board, key):
         return 200, {"board": self.store.delete_card(board, key, rev=self._rev())}
+
+    def api_add_task(self, board, key):
+        updated, task = self.store.add_task(board, key, self._body(), rev=self._rev())
+        return 201, {"board": updated, "task": task}
+
+    def api_update_task(self, board, key, task):
+        return 200, {"board": self.store.update_task(board, key, task, self._body(), rev=self._rev())}
+
+    def api_delete_task(self, board, key, task):
+        return 200, {"board": self.store.delete_task(board, key, task, rev=self._rev())}
+
+    def api_transfer_card(self, board, key):
+        body = self._body()
+        unknown = set(body) - {"board", "column", "targetRev"}
+        if unknown:
+            raise HttpError(400, f"Moving a card to another board takes board, column and targetRev, not {', '.join(sorted(unknown))}.")
+        target = body.get("board")
+        if not isinstance(target, str) or not target:
+            raise HttpError(400, "Say which board to move the card to, as board: its id.")
+        target_rev = body.get("targetRev")
+        if target_rev is not None and (isinstance(target_rev, bool) or not isinstance(target_rev, int)):
+            raise HttpError(400, "targetRev must be the other board's revision number.")
+        done = self.store.transfer_card(board, key, target, body.get("column"), rev=self._rev(), target_rev=target_rev)
+        return 200, done
 
     def _download(self, payload, name):
         filename = (slug(name, ()) or "board") + ".json"

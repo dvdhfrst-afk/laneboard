@@ -144,5 +144,100 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 413)
 
 
+    def test_board_parts_and_card_values_go_through_patch(self):
+        board = self.new_board()
+        path = f"/api/boards/{board['id']}"
+        status, data, _ = self.request("PATCH", path, {
+            "labels": ["Bug"], "properties": [{"name": "Points", "type": "number"}],
+            "views": [{"name": "Bugs", "query": "label:bug"}], "settings": {"defaultView": "Bugs", "limitPolicy": "refuse"}},
+            {"If-Match": str(board["rev"])})
+        self.assertEqual(status, 200)
+        board = data["board"]
+        self.assertEqual((board["labels"][0]["id"], board["properties"][0]["id"], board["settings"]["defaultView"]),
+                         ("bug", "points", "bugs"))
+        status, data, _ = self.request("POST", path + "/cards", {"title": "Valued", "labels": ["Bug"], "properties": {"points": 2},
+                                                                "tasks": ["One"]}, {"If-Match": str(board["rev"])})
+        self.assertEqual(status, 201)
+        card = data["board"]["cards"][0]
+        self.assertEqual((card["labels"], card["properties"], card["tasks"][0]["text"]), (["bug"], {"points": 2}, "One"))
+        status, data, _ = self.request("PATCH", f"{path}/cards/{data['key']}", {"properties": {"points": None}, "labels": []})
+        self.assertEqual((status, data["board"]["cards"][0]["properties"], data["board"]["cards"][0]["labels"]), (200, {}, []))
+        status, data, _ = self.request("PATCH", path, {"settings": {"limitPolicy": "never"}})
+        self.assertEqual(status, 400)
+        self.assertIn("limit policy", data["error"])
+        status, data, _ = self.request("PATCH", f"{path}/cards/T-1", {"labels": ["Nope"]})
+        self.assertEqual(status, 400)
+        self.assertIn("Labels: Bug.", data["error"])
+
+    def test_a_full_column_on_a_refusing_board_is_409(self):
+        board = self.new_board()
+        path = f"/api/boards/{board['id']}"
+        columns = [dict(c, limit=1) for c in board["columns"]]
+        self.request("PATCH", path, {"columns": columns, "settings": {"limitPolicy": "refuse"}})
+        self.assertEqual(self.request("POST", path + "/cards", {"title": "Fits"})[0], 201)
+        status, data, _ = self.request("POST", path + "/cards", {"title": "Doesn't"})
+        self.assertEqual(status, 409)
+        self.assertIn("Backlog is full", data["error"])
+
+    def test_task_routes(self):
+        board = self.new_board()
+        path = f"/api/boards/{board['id']}"
+        _, data, _ = self.request("POST", path + "/cards", {"title": "Has tasks"})
+        rev = data["board"]["rev"]
+        status, data, _ = self.request("POST", path + "/cards/T-1/tasks", {"text": "Write"}, {"If-Match": str(rev)})
+        self.assertEqual(status, 201)
+        task, rev = data["task"], data["board"]["rev"]
+        self.assertEqual(data["board"]["cards"][0]["tasks"], [{"id": task, "text": "Write", "done": False}])
+        status, data, _ = self.request("PATCH", f"{path}/cards/T-1/tasks/{task}", {"done": True}, {"If-Match": str(rev - 1)})
+        self.assertEqual(status, 412)
+        status, data, _ = self.request("PATCH", f"{path}/cards/T-1/tasks/{task}", {"done": True}, {"If-Match": str(rev)})
+        self.assertEqual((status, data["board"]["cards"][0]["tasks"][0]["done"]), (200, True))
+        status, data, _ = self.request("PATCH", f"{path}/cards/T-1/tasks/{task}", {"done": "yes"})
+        self.assertEqual(status, 400)
+        status, data, _ = self.request("PATCH", f"{path}/cards/T-1/tasks/nothere", {"done": True})
+        self.assertEqual(status, 404)
+        status, data, _ = self.request("POST", path + "/cards/T-1/tasks", {"text": "x"}, {"Origin": "https://example.com"})
+        self.assertEqual(status, 403)
+        status, data, _ = self.request("DELETE", f"{path}/cards/T-1/tasks/{task}")
+        self.assertEqual((status, data["board"]["cards"][0]["tasks"]), (200, []))
+        self.assertEqual(self.request("GET", f"{path}/cards/T-1/tasks")[0], 405)
+        self.assertEqual(self.request("PATCH", f"{path}/cards/T-1/tasks/Bad.Id", {"done": True})[0], 404)
+
+    def test_transfer_route(self):
+        source, target = self.new_board(), self.new_board()
+        path = f"/api/boards/{source['id']}"
+        self.request("PATCH", path, {"labels": ["Bug", "Docs"]})
+        self.request("PATCH", f"/api/boards/{target['id']}", {"labels": ["bug"]})
+        _, data, _ = self.request("POST", path + "/cards", {"title": "Travels", "labels": ["Bug", "Docs"]})
+        rev, target_rev = data["board"]["rev"], self.store.get_board(target["id"])["rev"]
+        body = {"board": target["id"], "column": "Done", "targetRev": target_rev}
+        self.assertEqual(self.request("POST", path + "/cards/T-1/transfer", dict(body, targetRev=target_rev - 1),
+                                      {"If-Match": str(rev)})[0], 412)
+        self.assertEqual(self.request("POST", path + "/cards/T-1/transfer", body, {"If-Match": str(rev - 1)})[0], 412)
+        self.assertEqual(self.request("POST", path + "/cards/T-1/transfer", body, {"Origin": "https://example.com"})[0], 403)
+        status, data, _ = self.request("POST", path + "/cards/T-1/transfer", body, {"If-Match": str(rev)})
+        self.assertEqual(status, 200)
+        self.assertEqual(set(data), {"board", "target", "key", "dropped"})
+        self.assertEqual((data["key"], data["dropped"], data["board"]["cards"]), ("T-1", ["Label: Docs"], []))
+        self.assertEqual((data["target"]["cards"][0]["column"], data["target"]["rev"]), ("done", target_rev + 1))
+
+    def test_transfer_requests_are_checked(self):
+        source, target = self.new_board(), self.new_board()
+        path = f"/api/boards/{source['id']}"
+        self.request("POST", path + "/cards", {"title": "Stays"})
+        cases = [({}, 400, "Say which board"), ({"board": 5}, 400, "Say which board"),
+                 ({"board": target["id"], "rev": 1}, 400, "not rev"), ({"board": target["id"], "targetRev": "1"}, 400, "targetRev"),
+                 ({"board": target["id"], "targetRev": True}, 400, "targetRev"),
+                 ({"board": "b-nothere"}, 404, "The board to move it to"), ({"board": source["id"]}, 400, "already on this board"),
+                 ({"board": target["id"], "column": "Nowhere"}, 400, "no column called")]
+        for body, code, phrase in cases:
+            with self.subTest(body=body):
+                status, data, _ = self.request("POST", path + "/cards/T-1/transfer", body)
+                self.assertEqual(status, code)
+                self.assertIn(phrase, data["error"])
+        self.assertEqual(self.request("POST", path + "/cards/T-9/transfer", {"board": target["id"]})[0], 404)
+        self.assertEqual(len(self.store.get_board(source["id"])["cards"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

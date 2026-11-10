@@ -76,9 +76,10 @@ class UpgradeTest(FileCase):
         store = Store(self.path)
         board = store.get_board("b-0a1b2c3d")
         want = self.old["boards"][0]
-        self.assertEqual({k: v for k, v in board.items() if k != "cards"}, {k: v for k, v in want.items() if k != "cards"})
+        added = {"labels": [], "properties": [], "views": [], "settings": schema.default_settings()}
+        self.assertEqual({k: v for k, v in board.items() if k != "cards"}, {**{k: v for k, v in want.items() if k != "cards"}, **added})
         for got, expected in zip(board["cards"], want["cards"]):
-            self.assertEqual(got, {**expected, "archived": None})
+            self.assertEqual(got, {**expected, "archived": None, "labels": [], "properties": {}, "tasks": []})
 
     def test_first_save_keeps_the_old_file_under_its_version(self):
         store = Store(self.path)

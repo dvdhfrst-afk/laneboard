@@ -16,17 +16,24 @@ import time
 from contextlib import contextmanager
 
 from . import schema, storage
+from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
-                     COLORS, ID_RE, KEY_RE, LINK_RE, MAX_BOARDS, MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECKLISTS,
-                     MAX_COLUMNS, MAX_GROUPS, MAX_NAME, MAX_ROWS, MAX_SUMMARY, MAX_TEXT, MAX_TITLE, PREFIX_RE,
-                     SCHEMA_VERSION, key_sort, now, rows, slug, text)
+                     CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
+                     MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECKLISTS, MAX_COLUMNS, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
+                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT, MAX_TITLE,
+                     MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort, now, rows, slug, text)
 
 DEFAULT_COLUMNS = [("Backlog", None), ("Ready", None), ("In progress", 1), ("Review", None), ("Done", None)]
 
-CARD_INPUT = ("title", "group", "column", "summary", "blocked", "fields", "sections", "notes", "rank", "checks")
+CARD_INPUT = ("title", "group", "column", "summary", "blocked", "fields", "sections", "notes", "rank", "checks",
+              "labels", "properties", "tasks")
 CARD_FIELDS = CARD_INPUT + ("archived",)
-BOARD_FIELDS = ("name", "description", "prefix", "groupLabel", "columns", "groups", "checklists", "template", "moveCards")
+BOARD_FIELDS = ("name", "description", "prefix", "groupLabel", "columns", "groups", "checklists", "template",
+                "labels", "properties", "views", "settings", "moveCards")
+SETTINGS_FIELDS = ("cardFace", "limitPolicy", "defaultView")
+TASK_FIELDS = ("text", "done")
 MIN_RANK_GAP = 1e-6
+NO_BOARD = "That board doesn't exist. It may have been deleted."
 
 
 def default_data_path() -> str:
@@ -100,12 +107,12 @@ class Store:
         if not create:
             raise NotFound(f"There's no boards file at {self.path} yet.")
         if not starter:
-            return {"version": SCHEMA_VERSION, "boards": []}
+            return {"version": SCHEMA_VERSION, "boards": [], "templates": []}
         try:
             with storage.FileLock(self.path + ".lock"):
                 if os.path.exists(self.path):  # another program got here first
                     return self._read()
-                data = {"version": SCHEMA_VERSION, "boards": [self._new_board("My board")]}
+                data = {"version": SCHEMA_VERSION, "boards": [self._new_board("My board")], "templates": []}
                 storage.write_atomic(self.path, encode_data(data))
                 self._stamp = self._file_stamp()
                 self.created = True
@@ -198,11 +205,11 @@ class Store:
             self._refresh()
             return self.data
 
-    def _find(self, board_id):
+    def _find(self, board_id, missing=NO_BOARD):
         for i, b in enumerate(self.data["boards"]):
             if b["id"] == board_id:
                 return i, b
-        raise NotFound("That board doesn't exist. It may have been deleted.")
+        raise NotFound(missing)
 
     def status(self):
         """What a health check shows."""
@@ -224,7 +231,8 @@ class Store:
         stamp = now()
         return {"id": "b-" + secrets.token_hex(4), "name": name, "description": description, "prefix": prefix,
                 "groupLabel": group_label, "rev": 1, "created": stamp, "updated": stamp,
-                "columns": cols, "groups": [], "checklists": [], "template": [], "counters": {}, "cards": []}
+                "columns": cols, "groups": [], "checklists": [], "template": [], "labels": [], "properties": [], "views": [],
+                "settings": default_settings(), "counters": {}, "cards": []}
 
     def _add_boards(self, boards):
         with self._changing():
@@ -265,6 +273,16 @@ class Store:
                 items = self._check_ids(board)
                 board["cards"] = [c if all(i in items for i in c["checks"])
                                   else {**c, "checks": [i for i in c["checks"] if i in items]} for c in board["cards"]]
+            # Settings last: the card face and the default view can name properties and views added in the same change.
+            if "labels" in changes:
+                board["labels"] = self._labels(board, changes["labels"])
+                self._fit_card_labels(board)
+            if "properties" in changes:
+                self._apply_properties(board, changes["properties"])
+            if "views" in changes:
+                self._apply_views(board, changes["views"])
+            if "settings" in changes:
+                self._apply_settings(board, changes["settings"])
             return None
 
         return self._mutate(board_id, rev, apply)[0]
@@ -294,12 +312,7 @@ class Store:
             incoming = [data]
         boards = []
         for i, raw in enumerate(incoming):
-            try:
-                boards.append(self._imported_board(raw))
-            except StoreError as e:
-                if len(incoming) == 1:
-                    raise
-                raise StoreError(f"Board number {i + 1}: {e}") from e
+            boards.append(self._imported_board(raw, i + 1 if len(incoming) > 1 else None))
         self._add_boards(boards)
         return boards
 
@@ -309,42 +322,32 @@ class Store:
         self._add_boards([made])
         return made
 
-    def _imported_board(self, board):
-        """Build a board from untrusted JSON. Everything is validated; only known fields are kept."""
-        if not isinstance(board, dict):
-            raise StoreError("An imported board must be a JSON object.")
-        draft = self._new_board(text(board.get("name"), "Board name", MAX_NAME, required=True),
-                                description=text(board.get("description"), "Description", MAX_SUMMARY))
-        if board.get("prefix") is not None:
-            draft["prefix"] = self._prefix(board["prefix"], "The board's key prefix")
-        if board.get("groupLabel") is not None:
-            draft["groupLabel"] = text(board["groupLabel"], "Group label", 30, required=True)
-        if board.get("columns"):
-            draft["columns"] = self._columns({"columns": [], "cards": []}, board["columns"], keep_ids=True)[0]
-        if board.get("groups"):
-            draft["groups"] = self._groups({"groups": [], "cards": []}, board["groups"], keep_ids=True)
-        if board.get("checklists"):
-            draft["checklists"] = self._checklists(board["checklists"])
-        if board.get("template"):
-            draft["template"] = self._template(board["template"])
-        cards = board.get("cards") or []
-        if not isinstance(cards, list):
-            raise StoreError("cards must be a list.")
-        if len(cards) > MAX_CARDS:
-            raise StoreError(f"A board can have at most {MAX_CARDS} cards. This one has {len(cards)}.")
-        counters = board.get("counters")
-        if isinstance(counters, dict):  # keeps keys of deleted cards from coming back
-            for prefix, number in counters.items():
-                if isinstance(prefix, str) and PREFIX_RE.fullmatch(prefix) and type(number) is int and 0 < number < 10**6:
-                    draft["counters"][prefix] = number
+    def _imported_board(self, board, number=None):
+        """Build a board from untrusted JSON. Everything is validated; only known fields are kept.
+
+        Takes the loose import shape (see docs/file-format.md) as well as a board exactly as exported.
+        `number` is the board's place in a file of several. Errors name the board, and the card and part.
+        """
+        label = f"Board number {number}" if number else None
+        try:
+            if not isinstance(board, dict):
+                raise StoreError("An imported board must be a JSON object.")
+            name = text(board.get("name"), "Board name", MAX_NAME, required=True)
+        except StoreError as e:
+            raise type(e)(f"{label}: {e}" if label else str(e)) from e
+        where = f'{label} ("{_shown(name)}")' if label else f'Board "{_shown(name)}"'
+        try:
+            draft = self._imported_parts(board, name)
+        except StoreError as e:
+            raise type(e)(f"{where}: {e}") from e
         items = self._check_ids(draft)
         column_names = {c["name"].lower(): c["id"] for c in draft["columns"]}
         group_names = {g["name"].lower(): g["id"] for g in draft["groups"]}
         seen, top_rank, built = set(), 0, []
-        for n, raw in enumerate(cards, 1):
-            if not isinstance(raw, dict):
-                raise StoreError(f"Card number {n} isn't a JSON object.")
+        for n, raw in enumerate(board.get("cards") or [], 1):
             try:
+                if not isinstance(raw, dict):
+                    raise StoreError("It isn't a JSON object.")
                 values = {k: raw[k] for k in CARD_INPUT if k in raw}
                 # A hand-written file may say "column": "In progress" instead of using the id.
                 if isinstance(values.get("column"), str):
@@ -353,6 +356,10 @@ class Store:
                     values["group"] = group_names.get(values["group"].lower(), values["group"])
                 if values.get("rank") is None:
                     values["rank"] = top_rank + 1
+                if "labels" in values:
+                    values["labels"] = self._imported_labels(draft, values["labels"])
+                if "properties" in values:
+                    values["properties"] = self._imported_values(draft, values["properties"])
                 card = self._new_card(draft, values, items)
                 top_rank = max(top_rank, card["rank"])
                 key = raw.get("key")
@@ -372,7 +379,9 @@ class Store:
                 if archived:
                     card["archived"] = text(archived, "archived", 40) if isinstance(archived, str) else now()
             except StoreError as e:
-                raise StoreError(f"Card number {n}: {e}") from e
+                title = raw.get("title") if isinstance(raw, dict) else None
+                title = f' ("{_shown(title.strip())}")' if isinstance(title, str) and title.strip() else ""
+                raise type(e)(f"{where}, card number {n}{title}: {e}") from e
             built.append(card)
         for card in built:  # keys come last, so a card with no key can't take one a later card asks for
             if card["key"] is None:
@@ -384,7 +393,87 @@ class Store:
                 card["key"] = f"{prefix}-{n}"
                 seen.add(card["key"])
         draft["cards"] = built
+        try:
+            self._check_limits(draft, {c["id"] for c in draft["columns"]})
+        except StoreError as e:
+            raise type(e)(f"{where}: {e}") from e
         return draft
+
+    def _imported_parts(self, board, name):
+        """Everything on an imported board except its cards, as a new board with no cards yet."""
+        draft = self._new_board(name, description=text(board.get("description"), "Description", MAX_SUMMARY))
+        if board.get("prefix") is not None:
+            draft["prefix"] = self._prefix(board["prefix"], "The board's key prefix")
+        if board.get("groupLabel") is not None:
+            draft["groupLabel"] = text(board["groupLabel"], "Group label", 30, required=True)
+        columns = board.get("columns")
+        if columns:
+            if isinstance(columns, list):  # a hand-written file may list just the names
+                columns = [{"name": c} if isinstance(c, str) else c for c in columns]
+            draft["columns"] = self._columns({"columns": [], "cards": []}, columns, keep_ids=True)[0]
+        groups = board.get("groups")
+        if groups:
+            if isinstance(groups, list):  # a group with no key prefix of its own uses the board's
+                groups = [{**g, "prefix": draft["prefix"]} if isinstance(g, dict) and g.get("prefix") is None else g
+                          for g in groups]
+            draft["groups"] = self._groups({"groups": [], "cards": []}, groups, keep_ids=True)
+        if board.get("checklists"):
+            draft["checklists"] = self._checklists(board["checklists"])
+        if board.get("template"):
+            draft["template"] = self._template(board["template"])
+        if board.get("labels") is not None:
+            draft["labels"] = self._labels(draft, board["labels"], keep_ids=True)
+        if board.get("properties") is not None:
+            self._apply_properties(draft, board["properties"], keep_ids=True)
+        if board.get("views") is not None:
+            self._apply_views(draft, board["views"], keep_ids=True)
+        if board.get("settings") is not None:
+            self._apply_settings(draft, board["settings"])
+        cards = board.get("cards") or []
+        if not isinstance(cards, list):
+            raise StoreError("cards must be a list.")
+        if len(cards) > MAX_CARDS:
+            raise StoreError(f"A board can have at most {MAX_CARDS} cards. This one has {len(cards)}.")
+        counters = board.get("counters")
+        if isinstance(counters, dict):  # keeps keys of deleted cards from coming back
+            for prefix, number in counters.items():
+                if isinstance(prefix, str) and PREFIX_RE.fullmatch(prefix) and type(number) is int and 0 < number < 10**6:
+                    draft["counters"][prefix] = number
+        return draft
+
+    def _imported_labels(self, draft, value):
+        """Card labels from an import, by id or name. A name the board doesn't have yet becomes a new label."""
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise StoreError("Labels must be a list of label names or ids.")
+        for given in value:
+            wanted = given.strip().casefold()
+            if not any(lab["id"] == given or lab["name"].casefold() == wanted for lab in draft["labels"]):
+                draft["labels"] = self._labels(draft, draft["labels"] + [{"name": given}], keep_ids=True)
+        return self._card_labels(draft, value)
+
+    @staticmethod
+    def _imported_values(draft, value):
+        """Card property values from an import, keyed by property name or id. Each value is tried as a stored
+        value first, then as the text form people type (so "3", "yes" and "iOS, Web" all work)."""
+        if not isinstance(value, dict):
+            raise StoreError("Properties must map property names to values.")
+        out = {}
+        for given, raw in value.items():
+            prop = find_property(draft, given)
+            if prop is None:
+                raise StoreError(f'There\'s no property called "{_shown(given)}". {_listed("Properties", draft["properties"])}')
+            kind = TYPES[prop["type"]]
+            try:
+                cleaned = kind.clean_value(raw, prop)
+            except StoreError:
+                if not isinstance(raw, str):
+                    raise
+                cleaned = kind.parse_text(raw, prop)
+            if cleaned is None:
+                out.pop(prop["id"], None)
+            else:
+                out[prop["id"]] = cleaned
+        return out
 
     # ---- cards ---------------------------------------------------------------------------------
 
@@ -398,6 +487,7 @@ class Store:
             if len(board["cards"]) >= MAX_CARDS:
                 raise Conflict(f"A board can have at most {MAX_CARDS} cards. Delete or move some first.")
             card = self._new_card(board, values, self._check_ids(board))
+            self._check_room(board, card["column"])
             if card["rank"] is None:
                 card["rank"] = max((c["rank"] for c in board["cards"]), default=0) + 1
             card["key"] = self._next_key(board, card["group"])
@@ -414,14 +504,17 @@ class Store:
 
         def apply(board):
             i = self._card_index(board, key)
-            card = {**board["cards"][i], **self._card_changes(board, changes)}
+            old = board["cards"][i]
+            card = {**old, **self._card_changes(board, changes, old)}
             if "archived" in changes:
-                was = board["cards"][i]["archived"]
+                was = old["archived"]
                 if changes["archived"] not in (True, False, None):
                     raise StoreError("archived must be true or false.")
                 card["archived"] = (was or now()) if changes["archived"] else None
                 if was and not card["archived"] and "rank" not in changes:  # comes back at the bottom of its column
                     card["rank"] = max((c["rank"] for c in board["cards"]), default=0) + 1
+            if not card["archived"] and (card["column"] != old["column"] or old["archived"]):
+                self._check_room(board, card["column"], moving=key)
             card["updated"] = now()
             board["cards"][i] = card
             if "rank" in changes or "column" in changes:
@@ -437,23 +530,111 @@ class Store:
 
         return self._mutate(board_id, rev, apply)[0]
 
+    def transfer_card(self, board_id, key, target_id, column=None, rev=None, target_rev=None):
+        """Move a card to another board, saving both boards in one step. Both revs are checked and both go up.
+
+        The card gets a new key from the target's counters and goes to the bottom of `column` (an id or a
+        name on the target), or else the column with the same name as its own, or else the first column.
+        Its group, labels, property values and checklist ticks carry over by name where the target has
+        them; `dropped` lists, as short text, each one that couldn't. Everything else on the card carries
+        over as it is. Returns {"board": source, "target": target, "key": new key, "dropped": [...]}.
+        """
+        if target_id == board_id:
+            raise StoreError("That card is already on this board. Choose another board to move it to.")
+
+        def apply(drafts):
+            source, target = drafts
+            i = self._card_index(source, key)
+            card, dropped = self._carried(source, target, source["cards"][i])
+            card["column"] = self._target_column(target, column, source, source["cards"][i])
+            if len(target["cards"]) >= MAX_CARDS:
+                raise Conflict(f"{target['name']} already has {MAX_CARDS} cards, the most a board can hold.")
+            if not card["archived"]:
+                self._check_room(target, card["column"])
+            card["rank"] = max((c["rank"] for c in target["cards"]), default=0) + 1
+            card["key"] = self._next_key(target, card["group"])
+            del source["cards"][i]
+            target["cards"].append(card)
+            self._tidy_ranks(target, card["column"])
+            return card["key"], dropped
+
+        (source, target), (new_key, dropped) = self._mutate_many(
+            [(board_id, rev, NO_BOARD), (target_id, target_rev, "The board to move it to doesn't exist. It may have been deleted.")],
+            apply)
+        return {"board": source, "target": target, "key": new_key, "dropped": dropped}
+
+    # ---- card tasks ----------------------------------------------------------------------------
+
+    def add_task(self, board_id, key, values, rev=None):
+        """Add a task to the end of a card's list. Returns (board, the new task's id)."""
+        self._only(values, TASK_FIELDS, "Tasks")
+
+        def apply(board):
+            i = self._card_index(board, key)
+            card = board["cards"][i]
+            if len(card["tasks"]) >= MAX_TASKS:
+                raise Conflict(f"A card can have at most {MAX_TASKS} tasks. Remove some first.")
+            task = {"id": self._new_task_id({t["id"] for t in card["tasks"]}), **self._task(values)}
+            board["cards"][i] = {**card, "tasks": card["tasks"] + [task], "updated": now()}
+            return task["id"]
+
+        return self._mutate(board_id, rev, apply)
+
+    def update_task(self, board_id, key, task_id, changes, rev=None):
+        """Change a task's text, or whether it's done. Only what is sent changes."""
+        self._only(changes, TASK_FIELDS, "Tasks")
+
+        def apply(board):
+            i = self._card_index(board, key)
+            card = board["cards"][i]
+            j = self._task_index(card, task_id)
+            tasks = list(card["tasks"])
+            tasks[j] = {**tasks[j], **self._task(changes, partial=True)}
+            board["cards"][i] = {**card, "tasks": tasks, "updated": now()}
+
+        return self._mutate(board_id, rev, apply)[0]
+
+    def delete_task(self, board_id, key, task_id, rev=None):
+        def apply(board):
+            i = self._card_index(board, key)
+            card = board["cards"][i]
+            j = self._task_index(card, task_id)
+            board["cards"][i] = {**card, "tasks": card["tasks"][:j] + card["tasks"][j + 1:], "updated": now()}
+
+        return self._mutate(board_id, rev, apply)[0]
+
     # ---- internals -----------------------------------------------------------------------------
 
     def _mutate(self, board_id, rev, apply):
         """Apply a change to a new copy of the board, save it, then swap it in. Returns (board, result)."""
+        drafts, result = self._mutate_many([(board_id, rev, NO_BOARD)], lambda drafts: apply(drafts[0]))
+        return drafts[0], result
+
+    def _mutate_many(self, targets, apply):
+        """Apply a change to new copies of one or more boards, save them in one write, then swap them in.
+
+        `targets` lists (board id, rev or None, message if the board is missing). Every rev is checked
+        before anything changes, and every board's rev goes up. Returns (drafts, result).
+        """
         with self._changing():
-            i, board = self._find(board_id)
-            self._check_rev(board, rev)
-            draft = dict(board)
-            draft["cards"] = list(board["cards"])
-            draft["counters"] = dict(board["counters"])
-            result = apply(draft)
-            draft["rev"] += 1
-            draft["updated"] = now()
+            found = []
+            for board_id, rev, missing in targets:
+                i, board = self._find(board_id, missing)
+                self._check_rev(board, rev)
+                found.append(i)
+            drafts = []
+            for i in found:
+                board = self.data["boards"][i]
+                drafts.append({**board, "cards": list(board["cards"]), "counters": dict(board["counters"])})
+            result = apply(drafts)
+            stamp = now()
             boards = list(self.data["boards"])
-            boards[i] = draft
+            for i, draft in zip(found, drafts):
+                draft["rev"] += 1
+                draft["updated"] = stamp
+                boards[i] = draft
             self._save({**self.data, "boards": boards})
-            return draft, result
+            return drafts, result
 
     @staticmethod
     def _check_rev(board, rev):
@@ -520,6 +701,7 @@ class Store:
         names = {c["id"]: c["name"] for c in board["columns"]}
         top = max((c["rank"] for c in board["cards"]), default=0)
         cards = list(board["cards"])
+        receiving = set()
         for cid in removed:
             target = move_cards.get(cid)
             if target is not None and (not isinstance(target, str) or target not in kept):
@@ -528,6 +710,8 @@ class Store:
             active = sum(1 for i in leaving if not cards[i]["archived"])
             if active and target is None:
                 raise Conflict(f"Move the {active} card{'s' if active > 1 else ''} out of {names[cid]} before removing it.")
+            if active:
+                receiving.add(target)
             for i in sorted(leaving, key=lambda i: (cards[i]["rank"], key_sort(cards[i]["key"]))):
                 if cards[i]["archived"] and target is None:
                     # An archived card still has to name a column, for when it comes back.
@@ -537,6 +721,7 @@ class Store:
                     cards[i] = {**cards[i], "column": target, "rank": top}
         board["cards"] = cards
         board["columns"] = out
+        self._check_limits(board, receiving)
 
     def _groups(self, board, groups, keep_ids=False):
         if not isinstance(groups, list):
@@ -654,7 +839,7 @@ class Store:
             raise StoreError("That group doesn't exist on this board.")
         return value
 
-    def _card_changes(self, board, values):
+    def _card_changes(self, board, values, card=None):
         """Validate only the fields being changed, so an old oversized field can't block a simple move."""
         out = {}
         if "title" in values:
@@ -677,6 +862,12 @@ class Store:
             out["notes"] = text(values["notes"], "Notes", MAX_TEXT, multiline=True)
         if "checks" in values:
             out["checks"] = self._checks(board, values["checks"])
+        if "labels" in values:
+            out["labels"] = self._card_labels(board, values["labels"])
+        if "properties" in values:
+            out["properties"] = self._card_values(board, values["properties"], card["properties"] if card else None)
+        if "tasks" in values:
+            out["tasks"] = self._tasks(values["tasks"])
         return out
 
     def _checks(self, board, checks, items=None):
@@ -699,8 +890,11 @@ class Store:
                 "fields": rows(values.get("fields"), "Fields", "value", 500),
                 "sections": rows(values.get("sections"), "Sections", "body", MAX_TEXT),
                 "notes": text(values.get("notes"), "Notes", MAX_TEXT, multiline=True),
-                "checks": self._checks(board, values.get("checks"), items), "archived": None,
-                "created": stamp, "updated": stamp}
+                "checks": self._checks(board, values.get("checks"), items),
+                "labels": self._card_labels(board, values.get("labels")),
+                "properties": self._card_values(board, values.get("properties")),
+                "tasks": self._tasks(values.get("tasks")),
+                "archived": None, "created": stamp, "updated": stamp}
 
     @staticmethod
     def _tidy_ranks(board, column):
@@ -720,3 +914,390 @@ class Store:
             n += 1
         board["counters"][prefix] = n
         return f"{prefix}-{n}"
+
+    @staticmethod
+    def _only(values, allowed, what):
+        if not isinstance(values, dict):
+            raise StoreError(f"{what} take an object of changes.")
+        unknown = set(values) - set(allowed)
+        if unknown:
+            raise StoreError(f"{what} have no {', '.join(sorted(unknown))} field.")
+
+    # ---- column limits -------------------------------------------------------------------------
+
+    @staticmethod
+    def _check_room(board, column_id, moving=None):
+        """When the board refuses cards over a column's limit, a full column takes no more cards.
+
+        `moving` is the key of a card already on the board, which doesn't count against its new column.
+        Archived cards never count, as on the page.
+        """
+        if board["settings"]["limitPolicy"] != "refuse":
+            return
+        col = next(c for c in board["columns"] if c["id"] == column_id)
+        if col["limit"] is None:
+            return
+        held = sum(1 for c in board["cards"] if c["column"] == column_id and not c["archived"] and c["key"] != moving)
+        if held >= col["limit"]:
+            raise Conflict(f"{col['name']} is full: its limit is {Store._cards(col['limit'])}. Move a card out of it "
+                           "first, or raise the limit in the board's settings.")
+
+    @staticmethod
+    def _check_limits(board, column_ids):
+        """After cards arrive in bulk (an import, or a removed column's cards), each of these columns must fit."""
+        if board["settings"]["limitPolicy"] != "refuse":
+            return
+        for col in board["columns"]:
+            if col["id"] in column_ids and col["limit"] is not None:
+                held = sum(1 for c in board["cards"] if c["column"] == col["id"] and not c["archived"])
+                if held > col["limit"]:
+                    raise Conflict(f"That would put {Store._cards(held)} in {col['name']}, over its limit of {col['limit']}, "
+                                   "and this board refuses cards once a column is full.")
+
+    @staticmethod
+    def _cards(n):
+        return f"{n} card{'' if n == 1 else 's'}"
+
+    # ---- labels --------------------------------------------------------------------------------
+
+    @staticmethod
+    def _labels(board, labels, keep_ids=False):
+        """A whole new list of labels for the board, kept in the order given.
+
+        A label keeps the id it sends when the board has that id (renaming keeps it on its cards); with
+        `keep_ids` (imports) any well formed id is kept. A label sent without an id keeps the id of the
+        label with the same name. A color left out keeps the old one, or takes the next color in turn.
+        """
+        if not isinstance(labels, list):
+            raise StoreError("Labels must be a list.")
+        if len(labels) > MAX_LABELS:
+            raise StoreError(f"A board can have at most {MAX_LABELS} labels.")
+        entries, names = [], set()
+        for raw in labels:
+            raw = {"name": raw} if isinstance(raw, str) else raw
+            if not isinstance(raw, dict):
+                raise StoreError("Each label needs a name.")
+            name = text(raw.get("name"), "Label name", MAX_LABEL_NAME, required=True)
+            if name.casefold() in names:
+                raise StoreError(f"There are two labels named {name}.")
+            names.add(name.casefold())
+            entries.append((raw, name))
+        old_colors = {lab["id"]: lab["color"] for lab in board["labels"]}
+        out = []
+        for i, ((raw, name), lid) in enumerate(zip(entries, _assign_ids(entries, board["labels"], keep_ids, (), str.casefold))):
+            color = raw.get("color") or old_colors.get(lid) or COLORS[i % len(COLORS)]
+            if not isinstance(color, str) or color not in COLORS:
+                raise StoreError(f"The color for the label {name} must be one of: {', '.join(COLORS)}.")
+            out.append({"id": lid, "name": name, "color": color})
+        return out
+
+    @staticmethod
+    def _fit_card_labels(board):
+        """After the labels change: cards keep only labels that still exist, in the board's order."""
+        order = {lab["id"]: i for i, lab in enumerate(board["labels"])}
+        cards, changed = [], False
+        for card in board["cards"]:
+            fitted = sorted((lid for lid in card["labels"] if lid in order), key=order.__getitem__)
+            if fitted != card["labels"]:
+                card, changed = {**card, "labels": fitted}, True
+            cards.append(card)
+        if changed:
+            board["cards"] = cards
+
+    @staticmethod
+    def _card_labels(board, value):
+        """A card's labels from ids or names (ignoring case), in the board's order, each once."""
+        if value is None:
+            return []
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise StoreError("Labels must be a list of label names or ids.")
+        by_id = {lab["id"] for lab in board["labels"]}
+        by_name = {lab["name"].casefold(): lab["id"] for lab in board["labels"]}
+        picked = set()
+        for given in value:
+            found = given if given in by_id else by_name.get(given.strip().casefold())
+            if found is None:
+                raise StoreError(f'There\'s no label called "{_shown(given.strip())}". {_listed("Labels", board["labels"])}')
+            picked.add(found)
+        if len(picked) > MAX_CARD_LABELS:
+            raise StoreError(f"A card can have at most {MAX_CARD_LABELS} labels.")
+        return [lab["id"] for lab in board["labels"] if lab["id"] in picked]
+
+    # ---- properties ----------------------------------------------------------------------------
+
+    def _apply_properties(self, board, raw, keep_ids=False):
+        """Set the board's property definitions, clear card values that no longer fit, and keep the card face
+        in step: a property sent with a changed onCard joins or leaves it, and a removed property leaves it."""
+        before = {p["id"]: p["onCard"] for p in board["properties"]}
+        board["properties"] = clean_definitions(board, raw, keep_ids=keep_ids)
+        prune_values(board)
+        ids = {p["id"] for p in board["properties"]}
+        face = [part for part in board["settings"]["cardFace"] if part in CARD_FACE_PARTS or part in ids]
+        for prop in board["properties"]:
+            if prop["onCard"] != before.get(prop["id"], False):
+                face = [part for part in face if part != prop["id"]] + ([prop["id"]] if prop["onCard"] else [])
+        self._set_card_face(board, face)
+
+    @staticmethod
+    def _card_values(board, value, current=None):
+        """A card's property values from API JSON keyed by property id, merged into `current`. None clears a value."""
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise StoreError("Properties must map property ids to values.")
+        by_id = {p["id"]: p for p in board["properties"]}
+        out = dict(current or {})
+        for pid, given in value.items():
+            prop = by_id.get(pid)
+            if prop is None:
+                raise StoreError(f'There\'s no property with the id "{_shown(pid)}". {_listed("Properties", board["properties"])}')
+            cleaned = TYPES[prop["type"]].clean_value(given, prop)
+            if cleaned is None:
+                out.pop(pid, None)
+            else:
+                out[pid] = cleaned
+        return {p["id"]: out[p["id"]] for p in board["properties"] if p["id"] in out}
+
+    # ---- saved views and settings --------------------------------------------------------------
+
+    @staticmethod
+    def _views(board, views, keep_ids=False):
+        """A whole new list of saved views. Ids are kept as labels' are; a query or sort left out keeps the old one.
+
+        The query and sort are stored as they are given; this module doesn't read them.
+        """
+        if not isinstance(views, list):
+            raise StoreError("Saved views must be a list.")
+        if len(views) > MAX_VIEWS:
+            raise StoreError(f"A board can have at most {MAX_VIEWS} saved views.")
+        entries, names = [], set()
+        for raw in views:
+            if not isinstance(raw, dict):
+                raise StoreError("Each saved view needs a name.")
+            name = text(raw.get("name"), "View name", MAX_VIEW_NAME, required=True)
+            if name.casefold() in names:
+                raise StoreError(f"There are two saved views named {name}.")
+            names.add(name.casefold())
+            entries.append((raw, name))
+        old = {v["id"]: v for v in board["views"]}
+        out = []
+        for (raw, name), vid in zip(entries, _assign_ids(entries, board["views"], keep_ids, (), str.casefold)):
+            before = old.get(vid, {})
+            out.append({"id": vid, "name": name,
+                        "query": text(raw.get("query", before.get("query", "")), f"The search for {name}", MAX_QUERY),
+                        "sort": text(raw.get("sort", before.get("sort", "")), f"The sort for {name}", MAX_SORT)})
+        return out
+
+    def _apply_views(self, board, views, keep_ids=False):
+        board["views"] = self._views(board, views, keep_ids)
+        default = board["settings"]["defaultView"]
+        if default is not None and default not in {v["id"] for v in board["views"]}:
+            board["settings"] = {**board["settings"], "defaultView": None}
+
+    def _apply_settings(self, board, raw):
+        """Change some of the board's settings; those left out stay as they are."""
+        if not isinstance(raw, dict):
+            raise StoreError("Settings must be an object.")
+        unknown = set(raw) - set(SETTINGS_FIELDS)
+        if unknown:
+            raise StoreError(f"Boards have no {', '.join(sorted(unknown))} setting.")
+        settings = dict(board["settings"])
+        if "limitPolicy" in raw:
+            if not isinstance(raw["limitPolicy"], str) or raw["limitPolicy"] not in LIMIT_POLICIES:
+                raise StoreError("The limit policy must be warn (a column over its limit is flagged) or refuse "
+                                 "(a full column takes no more cards).")
+            settings["limitPolicy"] = raw["limitPolicy"]
+        if "defaultView" in raw:
+            settings["defaultView"] = self._view_id(board, raw["defaultView"])
+        board["settings"] = settings
+        if "cardFace" in raw:
+            self._set_card_face(board, self._card_face(board, raw["cardFace"]))
+
+    @staticmethod
+    def _card_face(board, value):
+        """What cards show on the board, in order: parts of a card by name, and properties by name or id."""
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise StoreError("The card face must be a list of what each card shows.")
+        if len(value) > len(CARD_FACE_PARTS) + len(board["properties"]):
+            raise StoreError("The card face lists more than there is to show.")
+        out = []
+        for given in value:
+            word = given.strip()
+            if word.lower() in CARD_FACE_PARTS:
+                part = word.lower()
+            else:
+                prop = find_property(board, word)
+                part = prop["id"] if prop is not None else None
+            if part is None:
+                props = ", ".join(p["name"] for p in board["properties"])
+                raise StoreError(f'A card can\'t show "{_shown(word)}". It can show {", ".join(CARD_FACE_PARTS)}'
+                                 + (f", and the properties {props}." if props else "."))
+            if part in out:
+                raise StoreError(f'The card face lists "{_shown(word)}" twice.')
+            out.append(part)
+        return out
+
+    @staticmethod
+    def _set_card_face(board, face):
+        """settings.cardFace is what counts; each property's onCard follows it."""
+        if face != board["settings"]["cardFace"]:
+            board["settings"] = {**board["settings"], "cardFace": face}
+        shown = set(face)
+        if any(p["onCard"] != (p["id"] in shown) for p in board["properties"]):
+            board["properties"] = [p if p["onCard"] == (p["id"] in shown) else {**p, "onCard": p["id"] in shown}
+                                   for p in board["properties"]]
+
+    @staticmethod
+    def _view_id(board, value):
+        """A saved view by id, or by name ignoring case. None or "" means no default view."""
+        if value in (None, ""):
+            return None
+        if not isinstance(value, str):
+            raise StoreError("The default view must be the name of a saved view, or nothing.")
+        for view in board["views"]:
+            if view["id"] == value:
+                return view["id"]
+        for view in board["views"]:
+            if view["name"].casefold() == value.strip().casefold():
+                return view["id"]
+        raise StoreError(f'There\'s no saved view called "{_shown(value.strip())}". {_listed("Saved views", board["views"])}')
+
+    # ---- tasks ---------------------------------------------------------------------------------
+
+    @staticmethod
+    def _task(raw, partial=False):
+        """A task's text and done, cleaned. With `partial`, only the ones sent."""
+        out = {}
+        if not partial or "text" in raw:
+            out["text"] = text(raw.get("text"), "A task", MAX_TASK_TEXT, required=True)
+        if not partial or "done" in raw:
+            done = raw.get("done", False)
+            if not isinstance(done, bool):
+                raise StoreError("Whether a task is done must be true or false.")
+            out["done"] = done
+        return out
+
+    @classmethod
+    def _tasks(cls, value):
+        """A card's whole task list. Tasks may be {id, text, done} or just text. Ids sent are kept if they're
+        well formed and not used twice; the rest get new ones."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise StoreError("Tasks must be a list.")
+        if len(value) > MAX_TASKS:
+            raise StoreError(f"A card can have at most {MAX_TASKS} tasks.")
+        rows_in = [{"text": raw} if isinstance(raw, str) else raw for raw in value]
+        if not all(isinstance(raw, dict) for raw in rows_in):
+            raise StoreError("Each task needs text.")
+        cleaned = [cls._task(raw) for raw in rows_in]
+        kept, taken = [], set()
+        for raw in rows_in:
+            given = raw.get("id")
+            usable = isinstance(given, str) and ID_RE.fullmatch(given) and given not in taken
+            kept.append(given if usable else None)
+            if usable:
+                taken.add(given)
+        return [{"id": tid or cls._new_task_id(taken), **task} for tid, task in zip(kept, cleaned)]
+
+    @staticmethod
+    def _new_task_id(taken):
+        """A short id no other task on the card has. `taken` gets it added."""
+        while True:
+            made = "t" + secrets.token_hex(3)
+            if made not in taken:
+                taken.add(made)
+                return made
+
+    @staticmethod
+    def _task_index(card, task_id):
+        for i, task in enumerate(card["tasks"]):
+            if task["id"] == task_id:
+                return i
+        raise NotFound(f"{card['key']} has no task {task_id}. It may have been removed.")
+
+    # ---- moving a card to another board --------------------------------------------------------
+
+    @staticmethod
+    def _carried(source, target, card):
+        """The card as it will be on the target board (no key, column or rank yet), and what couldn't come."""
+        dropped = []
+        group = None
+        if card["group"] is not None:
+            name = next(g["name"] for g in source["groups"] if g["id"] == card["group"])
+            group = next((g["id"] for g in target["groups"] if g["name"].casefold() == name.casefold()), None)
+            if group is None:
+                dropped.append(f"{source['groupLabel']}: {name}")
+        names = {lab["id"]: lab["name"] for lab in source["labels"]}
+        there = {lab["name"].casefold(): lab["id"] for lab in target["labels"]}
+        labels = set()
+        for lid in card["labels"]:
+            match = there.get(names[lid].casefold())
+            if match is None:
+                dropped.append(f"Label: {names[lid]}")
+            else:
+                labels.add(match)
+        values = {}
+        for prop in source["properties"]:
+            if prop["id"] in card["properties"]:
+                value = card["properties"][prop["id"]]
+                shown = TYPES[prop["type"]].format_text(value, prop)
+                other = next((p for p in target["properties"] if p["name"].casefold() == prop["name"].casefold()), None)
+                fitted = None if other is None else Store._fit_value(other, value, shown)
+                if fitted is None:
+                    dropped.append(f"{prop['name']}: {shown}")
+                else:
+                    values[other["id"]] = fitted
+        lines = {item["id"]: (cl["name"], item["text"]) for cl in source["checklists"] for item in cl["items"]}
+        there = {(cl["name"].casefold(), item["text"].casefold()): item["id"]
+                 for cl in target["checklists"] for item in cl["items"] if not item["heading"]}
+        checks = []
+        for cid in card["checks"]:
+            if cid in lines:
+                match = there.get((lines[cid][0].casefold(), lines[cid][1].casefold()))
+                if match is None:
+                    dropped.append(f"Tick: {lines[cid][1]}")
+                elif match not in checks:
+                    checks.append(match)
+        moved = {**card, "group": group, "labels": [lab["id"] for lab in target["labels"] if lab["id"] in labels],
+                 "properties": {p["id"]: values[p["id"]] for p in target["properties"] if p["id"] in values},
+                 "checks": checks, "updated": now()}
+        return moved, dropped
+
+    @staticmethod
+    def _fit_value(prop, value, shown):
+        """A value from another board's property, made to fit `prop`: by its text first (choices by name), then
+        as it was stored (a number into a property with another unit). None if neither fits."""
+        kind = TYPES[prop["type"]]
+        for attempt in (lambda: kind.parse_text(shown, prop), lambda: kind.clean_value(value, prop)):
+            try:
+                fitted = attempt()
+            except StoreError:
+                continue
+            if fitted is not None:
+                return fitted
+        return None
+
+    @staticmethod
+    def _target_column(target, column, source, card):
+        """The column named (by id or name), or else the one with the card's own column's name, or the first."""
+        if column not in (None, ""):
+            if not isinstance(column, str):
+                raise StoreError("The column to move it to must be a column's name or id.")
+            for col in target["columns"]:
+                if col["id"] == column:
+                    return col["id"]
+            for col in target["columns"]:
+                if col["name"].casefold() == column.strip().casefold():
+                    return col["id"]
+            raise StoreError(f'{target["name"]} has no column called "{_shown(column.strip())}". '
+                             f'{_listed("Columns", target["columns"])}')
+        name = next(c["name"] for c in source["columns"] if c["id"] == card["column"]).casefold()
+        return next((c["id"] for c in target["columns"] if c["name"].casefold() == name), target["columns"][0]["id"])
+
+
+def _listed(what, items):
+    """The names a person could have meant, for the end of a message."""
+    if not items:
+        return f"This board has no {what.lower()} yet."
+    return f"{what}: {', '.join(item['name'] for item in items)}."

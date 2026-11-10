@@ -343,7 +343,7 @@ class ImportTest(Case):
     def test_import_errors_name_the_card(self):
         with self.assertRaises(StoreError) as caught:
             self.store.import_board({"name": "x", "cards": [{"title": "ok"}, {"title": ""}]})
-        self.assertIn("Card number 2", str(caught.exception))
+        self.assertIn('Board "x", card number 2', str(caught.exception))
 
     def test_random_junk_never_escapes_as_anything_but_a_store_error(self):
         rng = random.Random(20261107)
