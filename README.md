@@ -132,7 +132,21 @@ time to see the keyboard shortcuts and where your data is.
 - **New board** starts empty or from a template: the built-in ones, or your own. **Save as
   template** in **More** keeps a board's setup as a template, with its cards if you like, and
   **Templates** in **More** renames, describes and deletes the ones you saved.
-- Collapsing a column is remembered in that browser. It isn't saved in your boards file.
+- **Summary**, by the search box, opens a panel with the board's numbers: cards per column (with
+  limits and number totals), group, label and choice, number totals and averages, blocked and
+  archived cards, tasks and checklist ticks. It counts every card on the board, whatever the search
+  shows, and keeps up as the board changes. Pick a count, like a label or a column, to search for
+  those cards.
+- **Import a file** in **More** opens the Import sheet. A Laneboard file goes straight in, as a new
+  board. Any other file (see [Import and export](#import-and-export)) shows what it would add first:
+  the format it was read as, each board with its columns and cards, labels, properties, and what was
+  left out. If the format is wrong, pick another, then **Add**. A file that can't be read says why
+  and adds nothing.
+- **More** exports this board in each format listed there (Laneboard JSON, Markdown, a web page or
+  plain text) and **Export all boards** saves every board as one Laneboard file. Each one downloads
+  as a file named after the board.
+- Collapsed columns, and whether **Summary** is open, are remembered in that browser. They aren't saved
+  in your boards file.
 
 Columns show the first 300 cards with a button for more, so a very long column stays quick.
 
@@ -217,7 +231,8 @@ laneboard cards "Software release" --query "group:web OR is:blocked" --sort titl
 `laneboard export BOARD --format F` writes a board in one of these formats, and `laneboard import FILE`
 reads the ones that go the other way. An import tells the format from the file, or takes `--format`.
 It adds everything or nothing, never changes a board you have, and says what it left out.
-`--preview` shows what an import would add without adding it.
+`--preview` shows what an import would add without adding it. On the page, **Import a file** in
+**More** does the same, with the preview first, and **More** has an export for each format.
 
 | Format | `--format` | Export | Import | What it keeps | What it leaves out |
 |---|---|---|---|---|---|
@@ -237,7 +252,8 @@ laneboard import release.md --preview
 ```
 
 `laneboard stats BOARD` prints a board's numbers: cards and limits per column with number totals, cards
-per group and label, how each property is filled in, and tasks and checklist ticks done.
+per group and label, how each property is filled in, and tasks and checklist ticks done. **Summary** on
+the page shows the same numbers.
 
 ## Where your boards are kept
 
