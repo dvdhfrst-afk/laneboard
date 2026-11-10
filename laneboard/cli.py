@@ -877,7 +877,7 @@ def build_parser():
     default = default_data_path()
     common = Parser(add_help=False)
     # On every command, so `laneboard boards --data x` works as well as `laneboard --data x boards`.
-    common.add_argument("--data", metavar="FILE", default=argparse.SUPPRESS,
+    common.add_argument("--data", metavar="FILE", type=data_file, default=argparse.SUPPRESS,
                         help="boards file (default: $LANEBOARD_DATA, or " + default.replace("%", "%%") + ")")
 
     def run_options(p):
@@ -1034,6 +1034,13 @@ def build_parser():
     p.add_argument("--json", action="store_true", help="print JSON")
     command("check", cmd_check, "check that the boards file can be read")
     return parser
+
+
+def data_file(value):
+    # Not the default file: a script whose variable for the file name came out empty would change the usual boards.
+    if not value.strip():
+        raise argparse.ArgumentTypeError("needs the name of a boards file")
+    return value
 
 
 def port_number(value):

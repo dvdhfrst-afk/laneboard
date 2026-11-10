@@ -82,6 +82,13 @@ class HelpTest(CliCase):
         self.assertTrue(os.path.exists(other2))
         self.assertFalse(os.path.exists(self.data))
 
+    def test_an_empty_data_file_name_is_refused_rather_than_meaning_the_default(self):
+        # A script that says --data "$FILE" with FILE unset must not quietly change the boards in the usual place.
+        for args in (["--data", "", "sample", "garden"], ["sample", "garden", "--data", ""], ["--data=", "boards"]):
+            _, err = self.run_cli(*args, code=2)
+            self.assertIn("--data", err)
+        self.assertFalse(os.path.exists(self.data))
+
 
 class WorkflowTest(CliCase):
     def test_a_whole_session(self):
