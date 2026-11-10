@@ -25,20 +25,28 @@ MAX_TITLE = 200
 MAX_SUMMARY = 1000
 MAX_TEXT = 20000
 MAX_BOARDS = 500
+MAX_TEMPLATES = 100  # saved ones, besides the built-in ones
 MAX_CARDS = 20000
 MAX_COLUMNS = 20
+MAX_COLUMN_NAME = 40
+MAX_COLUMN_LIMIT = 999
 MAX_GROUPS = 50
+MAX_GROUP_NAME = 60
+MAX_GROUP_LABEL = 30
 MAX_ROWS = 30  # fields, sections, details
+MAX_SECTION_NAME = 60  # the sections a new card starts with
 MAX_CHECKLISTS = 10
+MAX_CHECKLIST_NAME = 60
 MAX_CHECK_ITEMS = 100
+MAX_CHECK_TEXT = 500
 MAX_RANK = 1e15
 MAX_LABELS = 50
 MAX_LABEL_NAME = 40
 MAX_CARD_LABELS = 20
 MAX_VIEWS = 30
 MAX_VIEW_NAME = 60
-MAX_QUERY = 500
-MAX_SORT = 200
+MAX_QUERY = 500  # a search, as typed or saved in a view
+MAX_SORT = 200  # a saved view's sort
 MAX_TASKS = 100
 MAX_TASK_TEXT = 300
 
@@ -449,21 +457,16 @@ def check_board(board, index, known_ids, where):
     _check_settings(board, at, view_ids)
 
 
-def check_templates(data, where):
-    """The file's saved templates: a list of objects, each with an id and a name."""
-    templates = data.setdefault("templates", [])
-    _require(isinstance(templates, list), where, "templates must be a list.")
-    for template in templates:
-        _require(isinstance(template, dict) and _is_str(template.get("id")) and _is_str(template.get("name")),
-                 where, "each saved template needs an id and a name.")
-
-
 def check_data(data, where):
-    """Check parsed file contents (already upgraded). Raises BadFile naming the first problem."""
+    """Check parsed file contents (already upgraded). Raises BadFile naming the first problem.
+
+    Saved templates get the same check as when they are made (laneboard/templates checks them).
+    """
     known = set()
     for i, board in enumerate(data["boards"]):
         check_board(board, i, known, where)
-    check_templates(data, where)
+    from .templates import check_templates  # here, not at the top: the templates module builds on this one
+    check_templates(data.setdefault("templates", []), where)
     return data
 
 

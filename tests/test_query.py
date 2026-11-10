@@ -215,7 +215,7 @@ class Qualifiers(ErrorCase):
         self.fails("group:x", 'There\'s no group called "x". Groups: Web site, API, Apps.', 6)
         board = make_board()
         board["groups"] = []
-        self.fails("group:x", "This board has no groups.", 6, board=board)
+        self.fails("group:x", "This board has no groups.", 0, board=board)
 
     def test_label(self):
         self.assertEqual(keys("label:bug"), ["T-1"])
@@ -230,7 +230,7 @@ class Qualifiers(ErrorCase):
         self.fails("label:chore", 'There\'s no label called "chore". Labels: Bug, Feature, Fix later.', 6)
         board = make_board()
         board["labels"] = []
-        self.fails("label:bug", "This board has no labels.", 6, board=board)
+        self.fails("label:bug", "This board has no labels.", 0, board=board)
 
     def test_key_title_and_notes(self):
         self.assertEqual(keys("key:T-1"), ["T-1"])
@@ -676,7 +676,7 @@ class OldBoards(ErrorCase):
         self.assertEqual(keys("is:archived", board=board), ["T-3"])
         self.assertEqual(keys(sort="-title", board=board), ["T-1", "T-2"])
         self.assertEqual(keys(sort="progress,created", board=board), ["T-1", "T-2"])
-        self.fails("label:x", "This board has no labels.", 6, board=board)
+        self.fails("label:x", "This board has no labels.", 0, board=board)
         self.fails("points:3", 'There\'s no qualifier called "points". Qualifiers: column, group, label, key, title, notes, '
                    'is, has, tasks, progress, sort.', 0, board=board)
         self.assertEqual(keys("", board={"columns": [{"id": "a", "name": "A"}]}), [])

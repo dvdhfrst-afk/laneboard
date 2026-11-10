@@ -216,8 +216,9 @@ class Version3Check(FileCase):
             (lambda d, b, c: c.update(properties={"size": 3}), "a property that doesn't exist ('size')"),
             (lambda d, b, c: c.update(properties={"points": "three"}), "the value of 'Points' must be a number"),
             (lambda d, b, c: d.update(templates={}), "templates must be a list"),
-            (lambda d, b, c: d.update(templates=[{"id": "t"}]), "each saved template needs an id and a name"),
-            (lambda d, b, c: d.update(templates=["basic"]), "each saved template needs an id and a name"),
+            (lambda d, b, c: d.update(templates=[{"id": "t"}]), "template 't' needs a name"),
+            (lambda d, b, c: d.update(templates=["basic"]), "a template isn't an object"),
+            (lambda d, b, c: d.update(templates=[{"id": "t", "name": "Mine"}]), "template 'Mine': it needs a board part"),
         ]
         for change, phrase in cases:
             with self.subTest(phrase=phrase):
@@ -236,7 +237,10 @@ class Version3Check(FileCase):
         board["labels"][0]["note"] = "mine"
         board["settings"]["futureSetting"] = 1
         board["cards"][0]["tasks"][0]["extra"] = True
-        data["templates"] = [{"id": "t", "name": "Mine", "whatever": [1]}]
+        data["templates"] = [{"id": "t", "name": "Mine", "description": "", "whatever": [1], "cards": [],
+                              "board": {"columns": [{"name": "A", "limit": None, "note": "kept"}], "prefix": "T",
+                                        "groupLabel": "Group", "groups": [], "labels": [], "properties": [],
+                                        "views": [], "checklists": [], "template": [], "settings": {}}}]
         self.write(json.dumps(data))
         store = Store(self.path)
         store.update_card("b-09ba90f6", "REL-1", {"title": "Changed"})

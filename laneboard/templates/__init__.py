@@ -11,24 +11,16 @@ import copy
 import os
 
 from .. import properties as props
-from ..schema import (COLORS, ID_RE, MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECKLISTS, MAX_COLUMNS, MAX_GROUPS, MAX_NAME,
-                      MAX_ROWS, MAX_SUMMARY, MAX_TITLE, PREFIX_RE, BadFile, NotFound, StoreError, _is_int, _is_str,
-                      _require, _text_rows, parse_json, slug, text)
+from ..query import broken_views
+from ..schema import (CARD_FACE_PARTS, COLORS, ID_RE, LIMIT_POLICIES, LINK_RE, MAX_CARD_LABELS, MAX_CARDS,
+                      MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
+                      MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME,
+                      MAX_LABELS, MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY,
+                      MAX_TASK_TEXT, MAX_TASKS, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, BadFile, NotFound,
+                      StoreError, _is_int, _is_str, _require, _text_rows, parse_json, slug, text)
 
 FOLDER = os.path.dirname(os.path.abspath(__file__))
 BUILTIN_IDS = ("basic", "software", "personal", "content", "support", "research")
-
-MAX_LABELS = 50
-MAX_LABEL_NAME = 40
-MAX_CARD_LABELS = 20
-MAX_VIEWS = 30
-MAX_VIEW_NAME = 60
-MAX_QUERY = 500
-MAX_TASKS = 100
-MAX_TASK_TEXT = 300
-MAX_SECTION_NAME = 60
-FACE_PARTS = ("group", "labels", "field", "progress", "blocked")
-LIMIT_POLICIES = ("warn", "refuse")
 
 _cache = []
 
@@ -114,11 +106,11 @@ def _check_columns(board, at):
     columns = board.get("columns")
     _require(isinstance(columns, list) and columns and all(isinstance(c, dict) for c in columns), at,
              "columns must be a list of columns, each with a name and a limit.")
-    names = _unique_names(columns, at, "columns", MAX_NAME, MAX_COLUMNS)
+    names = _unique_names(columns, at, "columns", MAX_COLUMN_NAME, MAX_COLUMNS)
     for col in columns:
         col.setdefault("limit", None)
-        _require(col["limit"] is None or (_is_int(col["limit"]) and col["limit"] >= 1), at,
-                 f"the limit of column {col['name']!r} must be a whole number of at least 1, or null.")
+        _require(col["limit"] is None or (_is_int(col["limit"]) and 1 <= col["limit"] <= MAX_COLUMN_LIMIT), at,
+                 f"the limit of column {col['name']!r} must be a whole number from 1 to {MAX_COLUMN_LIMIT}, or null.")
     return names
 
 
@@ -126,17 +118,19 @@ def _check_groups(board, at):
     prefix = board.setdefault("prefix", "T")
     _require(_is_str(prefix) and PREFIX_RE.fullmatch(prefix), at, "the key prefix must be capital letters and digits, like T.")
     label = board.setdefault("groupLabel", "Group")
-    _require(_is_str(label) and 0 < len(label) <= 30, at, "the group label must be text of 1 to 30 characters.")
+    _require(_is_str(label) and 0 < len(label) <= MAX_GROUP_LABEL, at,
+             f"the group label must be text of 1 to {MAX_GROUP_LABEL} characters.")
     groups = board.setdefault("groups", [])
     _require(isinstance(groups, list) and all(isinstance(g, dict) for g in groups), at, "groups must be a list of groups.")
-    names = _unique_names(groups, at, "groups", MAX_NAME, MAX_GROUPS)
+    names = _unique_names(groups, at, "groups", MAX_GROUP_NAME, MAX_GROUPS)
     for g in groups:
         g.setdefault("prefix", prefix)
         _require(_is_str(g["prefix"]) and PREFIX_RE.fullmatch(g["prefix"]), at, f"group {g['name']!r} has a bad key prefix.")
         g.setdefault("color", "slate")
         _require(g["color"] in COLORS, at, f"group {g['name']!r} has an unknown color.")
         g.setdefault("link", "")
-        _require(_is_str(g["link"]), at, f"the link of group {g['name']!r} must be text.")
+        _require(_is_str(g["link"]) and (not g["link"] or LINK_RE.fullmatch(g["link"])), at,
+                 f"the link of group {g['name']!r} must start with http:// or https://, or be empty.")
         g.setdefault("details", [])
         _text_rows(g["details"], at, f"the details of group {g['name']!r}", "value")
         _require(len(g["details"]) <= MAX_ROWS, at, f"group {g['name']!r} has too many details.")
@@ -170,10 +164,10 @@ def _check_views(board, at):
              "views must be a list of views, each with a name, a query and a sort.")
     names = _unique_names(views, at, "views", MAX_VIEW_NAME, MAX_VIEWS)
     for view in views:
-        for part in ("query", "sort"):
+        for part, limit in (("query", MAX_QUERY), ("sort", MAX_SORT)):
             view.setdefault(part, "")
-            _require(_is_str(view[part]) and len(view[part]) <= MAX_QUERY, at,
-                     f"the {part} of view {view['name']!r} must be text of at most {MAX_QUERY} characters.")
+            _require(_is_str(view[part]) and len(view[part]) <= limit, at,
+                     f"the {part} of view {view['name']!r} must be text of at most {limit} characters.")
     return names
 
 
@@ -182,13 +176,14 @@ def _check_checklists(board, at):
     _require(isinstance(lists, list) and len(lists) <= MAX_CHECKLISTS, at,
              f"checklists must be a list of at most {MAX_CHECKLISTS}.")
     for cl in lists:
-        _require(isinstance(cl, dict) and _is_str(cl.get("name")) and cl["name"].strip(), at, "each checklist needs a name.")
+        _require(isinstance(cl, dict) and _is_str(cl.get("name")) and 0 < len(cl["name"].strip()) <= MAX_CHECKLIST_NAME,
+                 at, f"each checklist needs a name of 1 to {MAX_CHECKLIST_NAME} characters.")
         items = cl.setdefault("items", [])
         _require(isinstance(items, list) and len(items) <= MAX_CHECK_ITEMS, at,
                  f"the lines of checklist {cl['name']!r} must be a list of at most {MAX_CHECK_ITEMS}.")
         for item in items:
-            _require(isinstance(item, dict) and _is_str(item.get("text")) and item["text"].strip(), at,
-                     f"each line of checklist {cl['name']!r} needs text.")
+            _require(isinstance(item, dict) and _is_str(item.get("text")) and 0 < len(item["text"].strip()) <= MAX_CHECK_TEXT,
+                     at, f"each line of checklist {cl['name']!r} needs text of up to {MAX_CHECK_TEXT} characters.")
             item["heading"] = bool(item.get("heading"))
 
 
@@ -208,7 +203,7 @@ def _check_settings(board, definitions, views, at):
     if face is not None:
         _require(isinstance(face, list) and all(_is_str(p) for p in face), at, "settings.cardFace must be a list of names.")
         for part in face:
-            _require(part in FACE_PARTS or props.find_property(pseudo, part) is not None, at,
+            _require(part in CARD_FACE_PARTS or props.find_property(pseudo, part) is not None, at,
                      f"settings.cardFace names {part!r}, which is neither a card part nor a property of this template.")
     policy = settings.get("limitPolicy")
     _require(policy is None or policy in LIMIT_POLICIES, at, "settings.limitPolicy must be warn or refuse.")
@@ -310,6 +305,11 @@ def template_from_board(board, name, description="", include_cards=False, taken_
     """
     name = text(name, "The template name", MAX_NAME, required=True)
     description = text(description, "The template description", MAX_SUMMARY)
+    broken = broken_views(board)  # a template with a view that can't be read would make no board
+    if broken:
+        view, error = broken[0]
+        raise StoreError(f"That board can't be saved as a template: its saved view \"{props._shown(view['name'])}\" "
+                         f"doesn't work any more. {error} Change or remove that view first.")
     template = {"id": slug(name, set(taken_ids) | set(BUILTIN_IDS)), "name": name, "description": description,
                 "board": _structure(board), "cards": _starter_cards(board) if include_cards else []}
     try:
@@ -368,10 +368,10 @@ def _settings_shape(settings, properties, views):
         # A property is written by name, except one named like a card part (say "Group"), which is written by id.
         face = []
         for part in settings["cardFace"]:
-            if part in FACE_PARTS:
+            if part in CARD_FACE_PARTS:
                 face.append(part)
             elif part in by_id:
-                face.append(by_id[part]["name"] if by_id[part]["name"].casefold() not in FACE_PARTS else part)
+                face.append(by_id[part]["name"] if by_id[part]["name"].casefold() not in CARD_FACE_PARTS else part)
         out["cardFace"] = face
     if "limitPolicy" in settings:
         out["limitPolicy"] = settings["limitPolicy"]

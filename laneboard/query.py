@@ -29,9 +29,8 @@ import unicodedata
 from fractions import Fraction
 
 from .properties import TYPES, _shown, find_property
-from .schema import ANY_KEY_RE, MAX_DECIMALS, StoreError, key_sort
+from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, key_sort
 
-MAX_QUERY = 500  # characters in a search or a sort string, as in a saved view
 MAX_DEPTH = 20   # parentheses inside parentheses
 
 QUALIFIERS = ("column", "group", "label", "key", "title", "notes", "is", "has", "tasks", "progress", "sort")
@@ -419,8 +418,8 @@ class _Compiler:
         return (lambda v: v.card.get("column") == cid), 1
 
     def q_group(self, tok, positive):
-        if not self.groups:
-            raise QueryError("This board has no groups.", tok.value_pos)
+        if not self.groups:  # at the qualifier, not the value: no group name could have worked
+            raise QueryError("This board has no groups.", tok.pos)
         options = [(g.get("id"), g.get("name")) for g in self.groups]
         gid = _pick(options, tok.value, tok.value_pos, f'There\'s no group called "{_shown(tok.value.strip())}". '
                     f'Groups: {", ".join(o[1] for o in options)}.', "group")
@@ -428,7 +427,7 @@ class _Compiler:
 
     def q_label(self, tok, positive):
         if not self.labels:
-            raise QueryError("This board has no labels.", tok.value_pos)
+            raise QueryError("This board has no labels.", tok.pos)
         options = [(label.get("id"), label.get("name")) for label in self.labels]
         lid = _pick(options, tok.value, tok.value_pos, f'There\'s no label called "{_shown(tok.value.strip())}". '
                     f'Labels: {", ".join(o[1] for o in options)}.', "label")
@@ -812,14 +811,8 @@ def compile_sort(text, board):
 # ---- the whole search ----------------------------------------------------------------------------
 
 
-def search(board, text="", sort="", archived=False):
-    """The keys of the cards on `board` that match `text`, in display order.
-
-    Columns come in board order; inside each, cards follow the sort: terms in `text`, then `sort`,
-    then manual order. Archived cards are left out unless `archived` is true or the search asks for
-    them (is:archived); then they are listed in their columns with the rest.
-    """
-    query = compile_query(text, board)
+def _order(query, board, sort):
+    """The order for a compiled search: its own sort: terms, then `sort`. Errors in a sort: term point into the search."""
     order = Sort()
     for tok in query._sort_terms:
         try:
@@ -828,20 +821,100 @@ def search(board, text="", sort="", archived=False):
             raise QueryError(str(e), tok.value_pos + e.position) from None
     if sort:
         order = order.then(compile_sort(sort, board))
+    return order
+
+
+def prepare(board, text="", sort=""):
+    """Read a search and a sort for `board` without running them: (Query, Sort). Raises QueryError.
+
+    This is the whole check a saved view gets: a view whose search and sort `prepare` accepts works.
+    """
+    query = compile_query(text, board)
+    return query, _order(query, board, sort)
+
+
+def _run(board, query, order, archived):
     include = bool(archived) or query.wants_archived
     test, build = query._test, query._build
     found = {col.get("id"): [] for col in board.get("columns") or []}
     elsewhere = []  # a card whose column isn't on the board (only in a hand-made dict) goes at the end
+    considered = 0
     for card in board.get("cards") or []:
         if card.get("archived") and not include:
             continue
+        considered += 1
         if test(_View(card, build)):
             found.get(card.get("column"), elsewhere).append(card)
     keys = []
     for cards in (*found.values(), elsewhere):
         cards.sort(key=order.key)
         keys.extend(card["key"] for card in cards)
-    return keys
+    return keys, considered
+
+
+def run(board, text="", sort="", archived=False):
+    """Like `search`, with a count: (keys, considered). `considered` is how many cards the search looked
+    at: the active cards, plus the archived ones when they were asked for."""
+    query, order = prepare(board, text, sort)
+    return _run(board, query, order, archived)
+
+
+def search(board, text="", sort="", archived=False):
+    """The keys of the cards on `board` that match `text`, in display order.
+
+    Columns come in board order; inside each, cards follow the sort: terms in `text`, then `sort`,
+    then manual order. Archived cards are left out unless `archived` is true or the search asks for
+    them (is:archived); then they are listed in their columns with the rest.
+    """
+    return run(board, text, sort, archived)[0]
+
+
+def search_boards(boards, text="", sort="", archived=False):
+    """Search several boards at once: [(board, keys, considered)] for each board with a match, in order.
+
+    A board that lacks something the search names (a property, a label, any groups) can't have a match
+    and is passed over. A sort a board can't use (a property it doesn't have) leaves that board's cards
+    in manual order, as cards with no value sort. Only when no board can read the search, or none of
+    the boards that read it can read the sort, is it an error: the QueryError from the board that read
+    furthest, which is the one most likely to say what was meant.
+    """
+    text, sort = _checked(text, "search"), _checked(sort, "sort", part="sort")
+    results, query_errors, sort_errors, read, sorted_ = [], [], [], 0, 0
+    for board in boards:
+        try:
+            query = compile_query(text, board)
+        except QueryError as e:
+            query_errors.append(e)
+            continue
+        read += 1
+        try:
+            order = _order(query, board, sort)
+            sorted_ += 1
+        except QueryError as e:
+            sort_errors.append(e)
+            order = Sort()
+        keys, considered = _run(board, query, order, archived)
+        if keys:
+            results.append((board, keys, considered))
+    for errors, worked in ((query_errors, read), (sort_errors, sorted_)):
+        if errors and not worked:
+            raise max(errors, key=lambda e: e.position)  # max keeps the first of equals
+    return results
+
+
+def broken_views(board):
+    """The saved views on `board` that can't be read any more, as [(view, QueryError)].
+
+    Saving a view checks it, so this only finds views that a later change broke: a property, label or
+    group they name was removed. Such a view is kept as it is, so nothing is lost; using it says why it fails.
+    """
+    out = []
+    for view in board.get("views") or []:
+        try:
+            prepare(board, view.get("query") or "", view.get("sort") or "")
+        except QueryError as e:
+            out.append((view, e))
+    return out
 
 
 def describe_error(text, error):

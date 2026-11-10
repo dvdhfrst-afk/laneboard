@@ -164,6 +164,98 @@ The card gets a key from the board it moves to. Its label comes with it because 
 one with the same name; the other board has no Points or Priority, so those stay behind, and the
 message says so. Its notes, sections and tasks always come with it.
 
+## Find cards
+
+`search` looks through every board and lists what it finds, board by board. Words match anywhere on a
+card, `OR` takes either word, and the README's [Search](../README.md#search) section has the rest:
+
+```bash
+laneboard search "upgrade OR session"
+```
+
+```text
+Software release (2 of 5 cards)
+  REL-1        To do          Write the upgrade guide
+  WEB-1        Doing          Show a clear message when the session ends
+Next release (1 of 1 card)
+  T-1          Ready          Write the upgrade notes  [docs]
+```
+
+`cards` takes the same searches for one board, with a sort. This lists the web cards and the blocked
+ones, by title within each column:
+
+```bash
+laneboard cards "Software release" --query "group:web OR is:blocked" --sort title
+```
+
+```text
+API-2        To do          Add an index for the audit query  [blocked]
+WEB-1        Doing          Show a clear message when the session ends
+WEB-2        Shipped        Fix the date picker on narrow screens
+```
+
+A search that names something the boards don't have says so, lists what they do have, and points at
+the spot. `laneboard search "label:dcos"` prints this and exits with `1`:
+
+```text
+laneboard: There's no label called "dcos". Labels: Docs.
+  label:dcos
+        ^
+```
+
+`cards --view "Docs work"` runs the view saved earlier. A view is checked when it is saved, so a typo
+like that one is refused then, not found later.
+
+## Start a board from a template
+
+A template starts a board with its columns, labels, properties and saved views already set up:
+
+```bash
+laneboard templates
+```
+
+```text
+basic                Basic (5 columns, 4 starter cards). Five plain columns from Backlog to Done, with a limit of one card in progress.
+software             Software team (5 columns, 5 starter cards). A product board with bugs, features and chores, story points, a priority and a component.
+personal             Personal (3 columns, 4 starter cards). A light board for home, errands and health: To do, Doing, Done.
+content              Content pipeline (5 columns, 5 starter cards). Posts, newsletters and videos from first idea to published, with channels and word counts.
+support              Customer support (4 columns, 5 starter cards). Requests from new to resolved, with a severity and a customer tier. Triaged holds five at a time and refuses a sixth.
+research             Research notes (4 columns, 4 starter cards). Questions, reading and notes through to a written summary, with a source link and a confidence rating.
+```
+
+```bash
+laneboard new "Our team" --template software
+```
+
+The starter cards show what the board is for. Change them or delete them.
+
+A board you have set up can become a template of your own. This keeps the release board's columns,
+groups, checklist, labels, properties, saved view and settings, without its cards (add `--cards` to keep
+them too, without their notes):
+
+```bash
+laneboard templates save "Software release" "Release board" --description "Components, a release checklist and new card sections."
+```
+
+```text
+Saved Release board as the template release-board (4 columns, no starter cards).
+```
+
+```bash
+laneboard new "Next quarter" --template "Release board"
+```
+
+```bash
+laneboard views "Next quarter"
+```
+
+```text
+Docs work                label:docs  sorted by -points
+```
+
+Saving or deleting a template never changes a board. `laneboard templates delete "Release board" --yes`
+deletes it, keeping a backup of the file first.
+
 ## Use it from a script
 
 `--json` gives you the data, and the exit code says whether it worked:

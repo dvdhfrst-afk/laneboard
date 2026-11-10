@@ -17,11 +17,16 @@ from contextlib import contextmanager
 
 from . import schema, storage
 from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
+from .query import QueryError, prepare
+from .templates import (BUILTIN_IDS, board_from_template, builtin_templates, describe, find_template, get_template,
+                        template_from_board)
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
                      CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
-                     MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECKLISTS, MAX_COLUMNS, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
-                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT, MAX_TITLE,
-                     MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort, now, rows, slug, text)
+                     MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
+                     MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
+                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
+                     MAX_TEMPLATES, MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort,
+                     now, rows, slug, text)
 
 DEFAULT_COLUMNS = [("Backlog", None), ("Ready", None), ("In progress", 1), ("Review", None), ("Done", None)]
 
@@ -240,9 +245,22 @@ class Store:
                 raise Conflict(f"A file can hold at most {MAX_BOARDS} boards.")
             self._save({**self.data, "boards": self.data["boards"] + boards})
 
-    def create_board(self, name, description=""):
-        board = self._new_board(text(name, "Board name", MAX_NAME, required=True),
-                                description=text(description, "Description", MAX_SUMMARY))
+    def create_board(self, name, description=None, template=None):
+        """Add a board. With `template` (a template's id or name) it gets that template's structure and starter
+        cards, named `name` or, when that is empty, after the template, and described as the template is unless
+        `description` is given."""
+        if template is None:
+            board = self._new_board(text(name, "Board name", MAX_NAME, required=True),
+                                    description=text(description, "Description", MAX_SUMMARY))
+        else:
+            if not isinstance(template, str):
+                raise StoreError("Say which template to use by its id or name.")
+            with self._lock:
+                self._refresh()
+                chosen = get_template(self.data["templates"], template)
+            name = text(name, "Board name", MAX_NAME) or None
+            description = None if description is None else text(description, "Description", MAX_SUMMARY)
+            board = self._imported_board(board_from_template(chosen, name, description))
         self._add_boards([board])
         return board
 
@@ -261,7 +279,7 @@ class Store:
             if "prefix" in changes:
                 board["prefix"] = self._prefix(changes["prefix"], "The board's key prefix")
             if "groupLabel" in changes:
-                board["groupLabel"] = text(changes["groupLabel"], "Group label", 30, required=True)
+                board["groupLabel"] = text(changes["groupLabel"], "Group label", MAX_GROUP_LABEL, required=True)
             if "columns" in changes:
                 self._apply_columns(board, changes["columns"], changes.get("moveCards"))
             if "groups" in changes:
@@ -394,7 +412,10 @@ class Store:
                 seen.add(card["key"])
         draft["cards"] = built
         try:
+            self._check_views(draft)  # with the cards in: a label a card brought can be in a view
             self._check_limits(draft, {c["id"] for c in draft["columns"]})
+        except QueryError as e:  # a plain error: an import has no search box to point into
+            raise StoreError(f"{where}: {e}") from e
         except StoreError as e:
             raise type(e)(f"{where}: {e}") from e
         return draft
@@ -405,7 +426,7 @@ class Store:
         if board.get("prefix") is not None:
             draft["prefix"] = self._prefix(board["prefix"], "The board's key prefix")
         if board.get("groupLabel") is not None:
-            draft["groupLabel"] = text(board["groupLabel"], "Group label", 30, required=True)
+            draft["groupLabel"] = text(board["groupLabel"], "Group label", MAX_GROUP_LABEL, required=True)
         columns = board.get("columns")
         if columns:
             if isinstance(columns, list):  # a hand-written file may list just the names
@@ -426,7 +447,7 @@ class Store:
         if board.get("properties") is not None:
             self._apply_properties(draft, board["properties"], keep_ids=True)
         if board.get("views") is not None:
-            self._apply_views(draft, board["views"], keep_ids=True)
+            self._apply_views(draft, board["views"], keep_ids=True, check=False)
         if board.get("settings") is not None:
             self._apply_settings(draft, board["settings"])
         cards = board.get("cards") or []
@@ -474,6 +495,75 @@ class Store:
             else:
                 out[prop["id"]] = cleaned
         return out
+
+    # ---- templates -----------------------------------------------------------------------------
+    #
+    # Saved templates live in the file's top-level list, saved with the same lock and backups as boards.
+    # Changing one never touches a board, so no board's rev moves.
+
+    def list_templates(self):
+        """The built-in templates, then the saved ones, as listings: {id, name, description, builtIn, columns, cards}."""
+        return [describe(t) for t in builtin_templates() + self.saved_templates()]
+
+    def saved_templates(self):
+        with self._lock:
+            self._refresh()
+            return self.data["templates"]
+
+    def save_template(self, board_id, name, description="", cards=False):
+        """Save a board's structure as a template, with its cards as starter cards if `cards`. Returns the template."""
+        if not isinstance(cards, bool):
+            raise StoreError("cards must be true or false: whether the template keeps the board's cards.")
+        with self._changing():
+            _, board = self._find(board_id)
+            saved = self.data["templates"]
+            if len(saved) >= MAX_TEMPLATES:
+                raise Conflict(f"A file can hold at most {MAX_TEMPLATES} saved templates. Delete one you don't use first.")
+            template = template_from_board(board, name, description, include_cards=cards, taken_ids=[t["id"] for t in saved])
+            self._unique_template_name(template["name"], saved)
+            self._save({**self.data, "templates": saved + [template]})
+        return template
+
+    def update_template(self, template_id, changes):
+        """Rename a saved template or change its description. Built-in templates can't be changed."""
+        self._only(changes, ("name", "description"), "Templates")
+        with self._changing():
+            i, template = self._saved_template(template_id)
+            template = dict(template)
+            if "name" in changes:
+                template["name"] = text(changes["name"], "The template name", MAX_NAME, required=True)
+                self._unique_template_name(template["name"], self.data["templates"], template_id)
+            if "description" in changes:
+                template["description"] = text(changes["description"], "The template description", MAX_SUMMARY)
+            templates = list(self.data["templates"])
+            templates[i] = template
+            self._save({**self.data, "templates": templates})
+        return template
+
+    def delete_template(self, template_id):
+        """Delete a saved template, keeping a backup of the file first. Built-in templates can't be deleted."""
+        with self._changing():
+            i, template = self._saved_template(template_id)
+            storage.tagged_snapshot(self.path, "before-delete")
+            templates = self.data["templates"]
+            self._save({**self.data, "templates": templates[:i] + templates[i + 1:]})
+        return template
+
+    def _saved_template(self, template_id):
+        if template_id in BUILTIN_IDS:
+            name = find_template([], template_id)["name"]
+            raise Conflict(f"{name} is a built-in template, so it can't be changed or deleted. Save a board as a "
+                           "template of your own instead.")
+        for i, template in enumerate(self.data["templates"]):
+            if template["id"] == template_id:
+                return i, template
+        raise NotFound("There's no saved template with that id. It may have been deleted.")
+
+    @staticmethod
+    def _unique_template_name(name, saved, own_id=None):
+        for template in builtin_templates() + saved:
+            if template["id"] != own_id and template["name"].strip().casefold() == name.casefold():
+                raise Conflict(f"There's already a template called {template['name']}. Choose another name.")
 
     # ---- cards ---------------------------------------------------------------------------------
 
@@ -670,15 +760,15 @@ class Store:
         for col in columns:
             if not isinstance(col, dict):
                 raise StoreError("Each column needs a name.")
-            name = text(col.get("name"), "Column name", 40, required=True)
+            name = text(col.get("name"), "Column name", MAX_COLUMN_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two columns named {name}.")
             names.add(name.lower())
             limit = col.get("limit")
             if limit in ("", None):
                 limit = None
-            elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 999:
-                raise StoreError(f"The limit for {name} must be a whole number from 1 to 999, or empty.")
+            elif isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_COLUMN_LIMIT:
+                raise StoreError(f"The limit for {name} must be a whole number from 1 to {MAX_COLUMN_LIMIT}, or empty.")
             cid = col.get("id")
             if not usable(cid) or (cid not in existing and cid in taken):
                 cid = slug(name, taken)
@@ -735,7 +825,7 @@ class Store:
         for g in groups:
             if not isinstance(g, dict):
                 raise StoreError("Each group needs a name.")
-            name = text(g.get("name"), "Group name", 60, required=True)
+            name = text(g.get("name"), "Group name", MAX_GROUP_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two groups named {name}.")
             names.add(name.lower())
@@ -777,7 +867,7 @@ class Store:
             raise StoreError(f"A new card can start with at most {MAX_ROWS} sections.")
         out = []
         for name in names:
-            name = text(name, "A new card section name", 60, required=True)
+            name = text(name, "A new card section name", MAX_SECTION_NAME, required=True)
             if name.lower() in (n.lower() for n in out):
                 raise StoreError(f"{name} is listed twice in new card sections.")
             out.append(name)
@@ -802,7 +892,7 @@ class Store:
         for cl in checklists:
             if not isinstance(cl, dict):
                 raise StoreError("Each checklist needs a name.")
-            name = text(cl.get("name"), "Checklist name", 60, required=True)
+            name = text(cl.get("name"), "Checklist name", MAX_CHECKLIST_NAME, required=True)
             if name.lower() in names:
                 raise StoreError(f"There are two checklists named {name}.")
             names.add(name.lower())
@@ -816,7 +906,7 @@ class Store:
                 if not isinstance(item, dict):
                     raise StoreError(f"Each line in {name} needs text.")
                 lines.append({"id": new_id(item.get("id"), lambda: "i" + secrets.token_hex(4)),
-                              "text": text(item.get("text"), f"A line in {name}", 500, required=True),
+                              "text": text(item.get("text"), f"A line in {name}", MAX_CHECK_TEXT, required=True),
                               "heading": bool(item.get("heading"))})
             out.append({"id": new_id(cl.get("id"), lambda: slug(name, taken)), "name": name, "items": lines})
         return out
@@ -1064,7 +1154,7 @@ class Store:
     def _views(board, views, keep_ids=False):
         """A whole new list of saved views. Ids are kept as labels' are; a query or sort left out keeps the old one.
 
-        The query and sort are stored as they are given; this module doesn't read them.
+        The query and sort are stored as they are given; `_check_views` makes sure they can be read.
         """
         if not isinstance(views, list):
             raise StoreError("Saved views must be a list.")
@@ -1088,11 +1178,31 @@ class Store:
                         "sort": text(raw.get("sort", before.get("sort", "")), f"The sort for {name}", MAX_SORT)})
         return out
 
-    def _apply_views(self, board, views, keep_ids=False):
+    def _apply_views(self, board, views, keep_ids=False, check=True):
+        before = {v["id"]: v for v in board["views"]}
         board["views"] = self._views(board, views, keep_ids)
+        if check:
+            self._check_views(board, before)
         default = board["settings"]["defaultView"]
         if default is not None and default not in {v["id"] for v in board["views"]}:
             board["settings"] = {**board["settings"], "defaultView": None}
+
+    @staticmethod
+    def _check_views(board, before=None):
+        """Every saved view that is new, or whose search or sort changed, must work on the board as it now is.
+
+        A view left as it was isn't read again: one that stopped working when a property it names was
+        removed stays on the board, so no change elsewhere loses it, and using it says what's wrong.
+        Raises QueryError, with the position in the view's search or sort.
+        """
+        for view in board["views"]:
+            old = (before or {}).get(view["id"])
+            if old is not None and old["query"] == view["query"] and old["sort"] == view["sort"]:
+                continue
+            try:
+                prepare(board, view["query"], view["sort"])
+            except QueryError as e:
+                raise QueryError(f"The saved view \"{_shown(view['name'])}\" can't be saved: {e}", e.position, e.part) from None
 
     def _apply_settings(self, board, raw):
         """Change some of the board's settings; those left out stay as they are."""

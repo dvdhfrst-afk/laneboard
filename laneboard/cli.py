@@ -15,9 +15,11 @@ from datetime import datetime
 
 from . import __version__, samples, storage
 from .properties import TYPE_NAMES, TYPES, find_property, property_text
+from .query import QueryError, broken_views, describe_error, run, search_boards
 from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
 from .server import BoardServer, encode_json
 from .store import Store, default_data_path, restore_backup, resolve_path
+from .templates import describe, get_template
 
 DEFAULT_PORT = 8642
 PROG = "laneboard"
@@ -168,22 +170,69 @@ def card_line(card, columns, labels=None):
     return f"{card['key']:<12} {columns.get(card['column'], card['column']):<14} {card['title']}{shown}{blocked}"
 
 
+def searched(board, query, sort, archived=False, view=None):
+    """Search one board: (keys, cards considered). A search that can't be read is a plain error, with the
+    text it is about and a pointer. `view` is the saved view the search (and maybe the sort) came from."""
+    try:
+        return run(board, query, sort, archived)
+    except QueryError as e:
+        if view is not None and (e.part == "query" or sort == view["sort"]):
+            trouble = view_trouble(view, e)
+            e = QueryError(trouble[:1].upper() + trouble[1:], e.position, e.part)
+        raise pointed(e, query, sort) from None
+
+
+def print_cards(board, cards, indent=""):
+    columns = {c["id"]: c["name"] for c in board["columns"]}
+    labels = {lab["id"]: lab["name"] for lab in board["labels"]}
+    for card in cards:
+        print(indent + card_line(card, columns, labels))
+
+
 def cmd_cards(args):
     store = Store(args.data)
     board = store.get_board(find_board(store, args.board))
     column = find_named(board["columns"], args.column, "column", board) if args.column else None
-    order = {c["id"]: i for i, c in enumerate(board["columns"])}
-    cards = [c for c in board["cards"] if bool(c["archived"]) == args.archived and (column is None or c["column"] == column)]
-    cards.sort(key=lambda c: (order.get(c["column"], 0), c["rank"]))
+    query, sort, view = args.query or "", args.sort or "", None
+    if args.view is not None:
+        vid = find_named(board["views"], args.view, "saved view", board)
+        view = next(v for v in board["views"] if v["id"] == vid)
+        query, sort = view["query"], view["sort"] if args.sort is None else args.sort
+    keys, _ = searched(board, query, sort, archived=args.archived, view=view)
+    by_key = {c["key"]: c for c in board["cards"]}
+    # --archived lists archived cards instead; without it a search can still ask for them, with is:archived
+    cards = [by_key[k] for k in keys if (not args.archived or by_key[k]["archived"]) and (column is None or by_key[k]["column"] == column)]
     if args.json:
         write_json(cards, None, False)
         return
-    columns = {c["id"]: c["name"] for c in board["columns"]}
-    labels = {lab["id"]: lab["name"] for lab in board["labels"]}
-    for card in cards:
-        print(card_line(card, columns, labels))
+    print_cards(board, cards)
     if not cards:
         print("No cards to show.")
+
+
+def cmd_search(args):
+    store = Store(args.data, starter=False)  # looking doesn't create a file
+    sort = args.sort or ""
+    if args.board:
+        board = store.get_board(find_board(store, args.board))
+        keys, considered = searched(board, args.query, sort)
+        results = [(board, keys, considered)] if keys else []
+    else:
+        try:
+            results = search_boards(store.all_data()["boards"], args.query, sort)
+        except QueryError as e:
+            raise pointed(e, args.query, sort) from None
+    found = [(board, [next(c for c in board["cards"] if c["key"] == k) for k in keys], considered)
+             for board, keys, considered in results]
+    if args.json:
+        write_json([{"board": board["id"], "name": board["name"], "total": considered, "cards": cards}
+                    for board, cards, considered in found], None, False)
+        return
+    for board, cards, considered in found:
+        print(f"{board['name']} ({len(cards)} of {count(considered, 'card')})")
+        print_cards(board, cards, "  ")
+    if not found:
+        print("No cards match.")
 
 
 def cmd_add(args):
@@ -419,8 +468,41 @@ def split_pair(given, option, shape, parser):
 
 def cmd_new(args):
     store = Store(args.data, starter=False)  # the new board is the first thing in a new file
-    board = store.create_board(args.name, args.description or "")
-    print(f"Added {board['name']} as {board['id']}.")
+    board = store.create_board(args.name, args.description, template=args.template)
+    if args.template is None:
+        print(f"Added {board['name']} as {board['id']}.")
+        return
+    template = get_template(store.saved_templates(), args.template)
+    cards = count(len(board["cards"]), "card") if board["cards"] else "no cards"
+    print(f"Added {board['name']} as {board['id']}, from the template {template['name']}, with {cards}.")
+
+
+def template_line(t):
+    cards = count(t["cards"], "starter card") if t["cards"] else "no starter cards"
+    about = f" {t['description']}" if t["description"] else ""
+    return f"{t['id']:<20} {t['name']} ({count(t['columns'], 'column')}, {cards}{'' if t['builtIn'] else ', saved'}).{about}"
+
+
+def cmd_templates(args):
+    if args.json and args.action:
+        args.parser.error("--json goes with listing the templates")
+    store = Store(args.data, starter=False)
+    if args.action == "save":
+        template = store.save_template(find_board(store, args.board), args.name, args.description, args.cards)
+        shown = describe(template)
+        cards = count(shown["cards"], "starter card") if shown["cards"] else "no starter cards"
+        print(f"Saved {shown['name']} as the template {shown['id']} ({count(shown['columns'], 'column')}, {cards}).")
+    elif args.action == "delete":
+        if not args.yes:
+            args.parser.error("deleting a template can't be undone except by restoring a backup; add --yes to delete it")
+        template = get_template(store.saved_templates(), args.name)
+        store.delete_template(template["id"])
+        print(f"Deleted the template {template['name']}.")
+    elif args.json:
+        write_json(store.list_templates(), None, False)
+    else:
+        for t in store.list_templates():
+            print(template_line(t))
 
 
 def cmd_labels(args):
@@ -525,6 +607,25 @@ def cmd_properties(args):
         print(f"{board['name']} has no properties yet. Add one with --add NAME --type TYPE.")
 
 
+def pointed(error, query, sort=""):
+    """A search error as a plain StoreError, with the text it is about shown under it and a ^ at the spot."""
+    return StoreError(describe_error(sort if error.part == "sort" else query, error))
+
+
+def view_trouble(view, error):
+    return f"the saved view \"{view['name']}\" doesn't work any more: {error}"
+
+
+def default_view(given):
+    """--default NAME: a saved view by name or id, or none for no default view."""
+    return None if given.strip().lower() == "none" else given
+
+
+def opens_with(board):
+    default = next((v["name"] for v in board["views"] if v["id"] == board["settings"]["defaultView"]), None)
+    return f"The board opens with {default}." if default else "The board opens with no view."
+
+
 def cmd_views(args):
     if (args.query is not None or args.sort is not None) and not args.add:
         args.parser.error("--query and --sort go with --add")
@@ -548,15 +649,17 @@ def cmd_views(args):
         if args.remove or args.add:
             changes["views"] = views
         if args.default is not None:
-            changes["settings"] = {"defaultView": None if args.default.strip().lower() == "none" else args.default}
+            changes["settings"] = {"defaultView": default_view(args.default)}
         updated = store.update_board(board["id"], changes, rev=board["rev"])
         if args.default is not None:
-            default = next((v["name"] for v in updated["views"] if v["id"] == updated["settings"]["defaultView"]), None)
-            said.append(f"The board opens with {default}." if default else "The board opens with no view.")
+            said.append(opens_with(updated))
         return updated
 
     if args.remove or args.add or args.default is not None:
-        changing(store, board_id, build)
+        try:
+            changing(store, board_id, build)
+        except QueryError as e:  # the new view's search or sort can't be read
+            raise pointed(e, args.query, args.sort) from None
         print("\n".join(said))
         return
     board = store.get_board(board_id)
@@ -582,6 +685,8 @@ def cmd_settings(args):
         settings["limitPolicy"] = args.limit_policy
     if args.card_face is not None:
         settings["cardFace"] = [part.strip() for part in args.card_face.split(",") if part.strip()]
+    if args.default is not None:
+        settings["defaultView"] = default_view(args.default)
     if settings:
         changes["settings"] = settings
     board = store.update_board(board_id, changes) if changes else store.get_board(board_id)
@@ -658,10 +763,16 @@ def cmd_check(args):
     if not os.path.exists(path):
         print("It doesn't exist yet. Laneboard creates it the first time it needs it.")
         return
-    status = Store(path, create=False).status()
+    store = Store(path, create=False)
+    status = store.status()
     print(f"Format: {status['schema']}" + (f" (the file is at {status['upgradedFrom']} and upgrades on the next save)" if status["upgradedFrom"] else ""))
     print(f"Boards: {status['boards']}, cards: {status['cards']}")
     print(f"Backups: {len(storage.list_backups(path))}")
+    broken = [(board, view, error) for board in store.all_data()["boards"] for view, error in broken_views(board)]
+    for board, view, error in broken:
+        print(f"Warning: on {board['name']}, {view_trouble(view, error)}")
+    if broken:
+        print("Those views are kept as they are. Change or remove them with laneboard views.")
     print("OK")
 
 
@@ -694,6 +805,15 @@ def build_parser():
     p.add_argument("board", help="board id or name")
     p.add_argument("--column", help="only this column (id or name)")
     p.add_argument("--archived", action="store_true", help="show archived cards instead")
+    find = p.add_mutually_exclusive_group()
+    find.add_argument("--query", metavar="Q", help="only cards that match this search, as typed in the search box")
+    find.add_argument("--view", metavar="NAME", help="only cards that match this saved view, in its order")
+    p.add_argument("--sort", metavar="S", help="the order within each column, like title or -points (default: as on the board)")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = command("search", cmd_search, "find cards on every board, or on one")
+    p.add_argument("query", help="what to look for, as typed in the search box")
+    p.add_argument("--board", help="only this board (id or name)")
+    p.add_argument("--sort", metavar="S", help="the order within each column, like title or -points")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = command("add", cmd_add, "add a card and print its key")
     p.add_argument("board", help="board id or name")
@@ -747,7 +867,20 @@ def build_parser():
     p.add_argument("--column", help="column on the other board (default: one with the same name, or else the first)")
     p = command("new", cmd_new, "make a new board")
     p.add_argument("name", help="the board's name")
-    p.add_argument("--description", help="a line about what the board is for")
+    p.add_argument("--description", help="a line about what the board is for (default: the template's, if there is one)")
+    p.add_argument("--template", metavar="T", help="start from a template, by id or name (see laneboard templates)")
+    p = command("templates", cmd_templates, "list the templates a new board can start from, or save and delete your own")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    actions = p.add_subparsers(dest="action", metavar="action")
+    a = actions.add_parser("save", parents=[common], help="save a board as a template", description="Save a board as a template.")
+    a.add_argument("board", help="board id or name")
+    a.add_argument("name", help="the template's name")
+    a.add_argument("--cards", action="store_true", help="keep the board's cards (without their notes) as starter cards")
+    a.add_argument("--description", help="a line about what the template is for")
+    a = actions.add_parser("delete", parents=[common], help="delete a template you saved",
+                           description="Delete a template you saved.")
+    a.add_argument("name", help="template id or name")
+    a.add_argument("--yes", action="store_true", help="really delete it (there's no undo but restoring a backup)")
     p = command("labels", cmd_labels, "list a board's labels, or add, rename and remove them")
     p.add_argument("board", help="board id or name")
     p.add_argument("--add", metavar="NAME", help="add a label")
@@ -781,6 +914,7 @@ def build_parser():
                    help="warn: flag a column over its limit; refuse: a full column takes no more cards")
     p.add_argument("--card-face", metavar="A,B,C",
                    help="what cards show, in order: " + ", ".join(CARD_FACE_PARTS) + " and property names (\"\" for only the title)")
+    p.add_argument("--default", metavar="NAME", help="the saved view the board opens with (by name or id), or none")
     p = command("import", cmd_import, "add boards from a JSON file (one exported board, or a whole boards file)")
     p.add_argument("file", help="the file, or - for standard input")
     p = command("export", cmd_export, "write a board as JSON")

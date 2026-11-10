@@ -10,7 +10,7 @@ One JSON file in UTF-8. You can read it, edit it by hand, and keep it in version
 }
 ```
 
-`templates` holds saved board templates, each with at least an `id` and a `name`.
+`templates` holds the board templates you saved. See [Saved templates](#saved-templates).
 
 ## A board
 
@@ -26,7 +26,7 @@ One JSON file in UTF-8. You can read it, edit it by hand, and keep it in version
 | `groups` | `[{id, name, prefix, color, link, details}]`. `details` is `[{label, value}]` |
 | `labels` | `[{id, name, color}]`. Names differ, ignoring case |
 | `properties` | `[{id, name, type, onCard, ...}]`, the values every card can hold. See below |
-| `views` | `[{id, name, query, sort}]`, saved searches. `query` and `sort` are kept as typed, and either can be `""` |
+| `views` | `[{id, name, query, sort}]`, saved searches. `query` and `sort` are kept as typed, and either can be `""`. A view the board can't read is refused when it is saved |
 | `settings` | `{cardFace, limitPolicy, defaultView}`. See below |
 | `template` | Names of the sections a new card starts with |
 | `checklists` | `[{id, name, items: [{id, text, heading}]}]` |
@@ -89,6 +89,44 @@ choice wherever it was picked.
 
 Removing a label from the board takes it off every card in the same save.
 
+## Saved templates
+
+Each entry in `templates` is a board's setup, saved with `laneboard templates save` or
+`POST /api/templates`. The built-in templates aren't in the file.
+
+| Field | Meaning |
+|---|---|
+| `id` | Lowercase letters, digits and hyphens, made from the name. Not one of the built-in ids: `basic`, `software`, `personal`, `content`, `support`, `research` |
+| `name` | Up to 120 characters. No two saved templates share a name, ignoring case |
+| `description` | Up to 1,000 characters |
+| `board` | The setup, written the way an import writes it: `prefix`, `groupLabel`, `columns`, `groups`, `labels`, `properties`, `views`, `checklists`, `template` and `settings`, by name rather than by id. Checklist lines keep their ids |
+| `cards` | Starter cards: `title`, `column`, `group`, `summary`, `blocked`, `fields`, `sections`, `checks`, `labels`, `properties` and `tasks`, by name as in an import, or `[]`. A starter card's labels must be in `board.labels` |
+
+A hand-written one can leave out most of that:
+
+```json
+{
+  "id": "weekly-chores",
+  "name": "Weekly chores",
+  "description": "Jobs around the house, week by week.",
+  "board": {
+    "prefix": "C",
+    "columns": [{ "name": "To do" }, { "name": "Doing", "limit": 2 }, { "name": "Done" }],
+    "labels": [{ "name": "Outside", "color": "green" }],
+    "properties": [{ "name": "Minutes", "type": "number" }],
+    "views": [{ "name": "Quick jobs", "query": "minutes:<=15", "sort": "title" }]
+  },
+  "cards": [
+    { "title": "Sweep the path", "column": "To do", "labels": ["Outside"], "properties": { "Minutes": "10" } },
+    { "title": "Clean the windows", "column": "To do", "properties": { "Minutes": "45" } }
+  ]
+}
+```
+
+With that in `templates`, `laneboard new "" --template "weekly chores"` makes a board called Weekly
+chores with two cards. A template's views are checked when a board is made from it: one the board can't
+read stops the board being made, and the message names the view.
+
 ## Limits
 
 Board name 120 characters, card title 200, summary 1,000, other text 20,000. 500 boards, 20,000 cards
@@ -96,8 +134,8 @@ per board, 20 columns, 50 groups, 30 fields or sections on a card, 10 checklists
 
 50 labels per board (names 40 characters) and 20 on a card. 30 properties per board (names 40
 characters), 50 choices on a property, 20 picked at once, text and link values 500 characters, units
-10. 30 saved views per board (names 60 characters, searches 500). 100 tasks on a card, 300 characters
-each.
+10. 30 saved views per board (names 60 characters, searches 500, sorts 200). 100 tasks on a card, 300
+characters each. 100 saved templates.
 
 ## Editing by hand
 
@@ -150,7 +188,8 @@ just their text. In `settings`, the card face names properties and `defaultView`
 
 An import is all or nothing. If anything in it can't be kept, nothing is added, and the message names the
 board, the card and what was wrong. With `"Hours": "a while"` that is `Board "Garden", card number 1
-("Plant the beans"): Hours must be a number.`
+("Plant the beans"): Hours must be a number.` A saved view the board can't read is refused the same way,
+and the message names the view.
 
 ## Versions
 
