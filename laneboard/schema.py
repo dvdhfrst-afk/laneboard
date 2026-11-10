@@ -33,6 +33,19 @@ MAX_CHECKLISTS = 10
 MAX_CHECK_ITEMS = 100
 MAX_RANK = 1e15
 
+# Card properties (laneboard/properties.py checks and cleans them)
+MAX_PROPERTIES = 30
+MAX_PROPERTY_NAME = 40
+MAX_PROPERTY_TEXT = 500  # text and link values
+MAX_CHOICES = 50
+MAX_CHOICE_NAME = 40
+MAX_MULTI = 20  # choices picked at once in a multi property
+MAX_UNIT = 10
+MAX_DECIMALS = 4
+MAX_NUMBER = 10 ** 15
+RATING_MAX_RANGE = (3, 10)  # how high a rating property can go: at least 3, at most 10
+DEFAULT_RATING_MAX = 5
+
 _SURROGATE = re.compile("[\ud800-\udfff]")
 _CONTROL_LINE = re.compile("[\x00-\x1f\x7f-\x9f  ]+")
 _CONTROL_TEXT = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
