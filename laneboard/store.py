@@ -278,7 +278,7 @@ class Store:
                 chosen = get_template(self.data["templates"], template)
             name = text(name, "Board name", MAX_NAME) or None
             description = None if description is None else text(description, "Description", MAX_SUMMARY)
-            board = self._imported_board(board_from_template(chosen, name, description))
+            board = self._imported_board(board_from_template(chosen, name, description), typed=True)
         self._add_boards([board])
         return board
 
@@ -369,12 +369,13 @@ class Store:
         self._add_boards([made])
         return made
 
-    def _imported_board(self, board, number=None, check_views=True):
+    def _imported_board(self, board, number=None, check_views=True, typed=False):
         """Build a board from untrusted JSON. Everything is validated; only known fields are kept.
 
         Takes the loose import shape (see docs/file-format.md) as well as a board exactly as exported.
         `number` is the board's place in a file of several. Errors name the board, and the card and part.
-        Without `check_views`, saved views that don't work are kept for the caller to look at.
+        Without `check_views`, saved views that don't work are kept for the caller to look at. With `typed`, card
+        property values given as text are read as typed first, as a template's starter cards keep them.
         """
         label = f"Board number {number}" if number else None
         try:
@@ -407,7 +408,7 @@ class Store:
                 if "labels" in values:
                     values["labels"] = self._imported_labels(draft, values["labels"])
                 if "properties" in values:
-                    values["properties"] = self._imported_values(draft, values["properties"])
+                    values["properties"] = self._imported_values(draft, values["properties"], typed)
                 card = self._new_card(draft, values, items)
                 top_rank = max(top_rank, card["rank"])
                 key = raw.get("key")
@@ -504,9 +505,10 @@ class Store:
         return self._card_labels(draft, value)
 
     @staticmethod
-    def _imported_values(draft, value):
+    def _imported_values(draft, value, typed=False):
         """Card property values from an import, keyed by property name or id. Each value is tried as a stored
-        value first, then as the text form people type (so "3", "yes" and "iOS, Web" all work)."""
+        value first, then as the text form people type (so "3", "yes" and "iOS, Web" all work). With `typed`, text
+        is tried as typed first: a choice named like another choice's id then means the one with that name."""
         if not isinstance(value, dict):
             raise StoreError("Properties must map property names to values.")
         out = {}
@@ -515,12 +517,13 @@ class Store:
             if prop is None:
                 raise StoreError(f'There\'s no property called "{_shown(given)}". {_listed("Properties", draft["properties"])}')
             kind = TYPES[prop["type"]]
+            first, then = (kind.parse_text, kind.clean_value) if typed and isinstance(raw, str) else (kind.clean_value, kind.parse_text)
             try:
-                cleaned = kind.clean_value(raw, prop)
+                cleaned = first(raw, prop)
             except StoreError:
                 if not isinstance(raw, str):
                     raise
-                cleaned = kind.parse_text(raw, prop)
+                cleaned = then(raw, prop)
             if cleaned is None:
                 out.pop(prop["id"], None)
             else:
@@ -566,7 +569,7 @@ class Store:
 
     def _template_board(self, template):
         """The board a template makes, checked as an import is but with its views not yet read: (board, broken views)."""
-        draft = self._imported_board(board_from_template(template), check_views=False)
+        draft = self._imported_board(board_from_template(template), check_views=False, typed=True)
         return draft, broken_views(draft)
 
     def template_troubles(self):

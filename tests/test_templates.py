@@ -728,6 +728,18 @@ class SavedTemplates(unittest.TestCase):
         self.assertEqual(sorted(c["title"] for c in board["cards"]), sorted(c["title"] for c in self.before["cards"]))
         self.assertEqual([v["query"] for v in board["views"]], [v["query"] for v in self.before["views"]])
 
+    def test_a_starter_card_keeps_its_choice_when_one_choice_is_named_like_another_ones_id(self):
+        # "front-end" is the second choice's name and the first choice's id. Starter cards keep values as text,
+        # so the board made from the template must read it as the name.
+        board = self.store.create_board("Teams")
+        board = self.store.update_board(board["id"], {"properties": [
+            {"name": "Team", "type": "choice", "choices": ["Front end", "front-end"]}]})
+        self.assertEqual([c["id"] for c in board["properties"][0]["choices"]], ["front-end", "front-end-2"])
+        board, _ = self.store.create_card(board["id"], {"title": "One", "properties": {"team": "front-end-2"}})
+        self.store.save_template(board["id"], "Teams", "", cards=True)
+        made = self.store.create_board("", template="teams")
+        self.assertEqual(P.property_text(made, made["cards"][0], made["properties"][0]), "front-end")
+
     def test_the_listing(self):
         self.store.save_template(self.board, "Our setup", cards=True)
         listed = self.store.list_templates()
