@@ -1,5 +1,6 @@
 // Opening boards and cards: following the address (#<board id> or #<board id>/<card key>, then the search and sort,
-// see parseHash) and going to a board. A board opening with no search in the address uses its default view.
+// see parseHash, or #/boards for the boards overview) and going to a board. A board opening with no search in the
+// address uses its default view.
 
 import { parseHash, recall, resetView, setBoard, setHash, sheet, state } from "./state.js";
 import { askDiscard, closeSheet, toast } from "./dom.js";
@@ -7,6 +8,7 @@ import { loadBoard, loadBoards } from "./api.js";
 import { render } from "./board.js";
 import { openCard } from "./card.js";
 import { useDefaultView, useFilter } from "./views.js";
+import { OVERVIEW, isOverview, leaveOverview, showOverview } from "./boards.js";
 
 export async function route() {
   if (sheet.dirty) {  // arrived here by the back button or a typed address; don't drop what's being typed
@@ -19,12 +21,24 @@ export async function route() {
     });
     return;
   }
+  if (isOverview()) {
+    if (sheet.mode === "view") closeSheet(true);
+    await showOverview();
+    render();
+    return;
+  }
+  if (state.overview) leaveOverview();
   const want = parseHash();
-  const ids = state.boards.map((b) => b.id);
-  const id = [want.board, recall()].find((x) => ids.includes(x)) || ids[0];
+  // Any board opens by its address; otherwise the last one used, or the first, of the boards not archived.
+  const usable = state.boards.filter((b) => !b.archivedAt).map((b) => b.id);
+  const id = state.boards.some((b) => b.id === want.board) ? want.board : [recall()].find((x) => usable.includes(x)) || usable[0];
   if (!id) {
     setBoard(null);
     closeSheet(true);
+    if (state.boards.length) {  // every board is archived: the overview is where they are
+      history.replaceState(null, "", `#${OVERVIEW}`);
+      await showOverview();
+    }
     render();
     return;
   }
@@ -53,6 +67,7 @@ export async function route() {
 export async function goToBoard(id) {
   sheet.dirty = false;
   closeSheet(true);
+  if (state.overview) leaveOverview();
   await loadBoards();
   resetView();
   await loadBoard(id);

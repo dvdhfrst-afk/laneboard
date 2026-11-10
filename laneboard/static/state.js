@@ -7,7 +7,8 @@ export const START_COMMAND = "python -m laneboard";
 const LAST_BOARD = "laneboard:last-board";
 
 export const state = {
-  boards: [],          // [{id, name, cards, archived, rev}]
+  boards: [],          // [{id, name, cards, archived, archivedAt, rev}]: every board, archived ones too, in order
+  overview: false,     // the boards overview (#/boards) is showing instead of a board
   board: null,         // the open board, as the server last sent it
   query: "",           // the search box, sent to the server as typed; the server reads the search language
   sort: "",            // the sort picker's sort string, like "-points"; empty is the board's own order

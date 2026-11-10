@@ -105,6 +105,10 @@ export function toast(message, { error = false, action = null } = {}) {
   toastTimer = setTimeout(() => { el.hidden = true; }, error ? 9000 : action ? 7000 : 4000);
 }
 
+// What the banner offers when the boards file has a problem (the Backups sheet), set by main.js, which can import it.
+let bannerAction = null;
+export const setBannerAction = (action) => { bannerAction = action; };
+
 export function renderBanner() {
   const el = $("#banner");
   const message = state.offline
@@ -112,6 +116,9 @@ export function renderBanner() {
     : state.problem || state.versionNote;
   el.hidden = !message;
   el.textContent = message || "";
+  if (state.problem && !state.offline && bannerAction) {
+    el.append(" ", h("button", { type: "button", text: bannerAction.label, onclick: bannerAction.run }));
+  }
   el.className = state.offline || state.problem ? "banner bad" : "banner";
 }
 

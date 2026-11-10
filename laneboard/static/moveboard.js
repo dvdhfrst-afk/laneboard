@@ -8,7 +8,7 @@ import { renderPicker } from "./board.js";
 import { goToBoard } from "./nav.js";
 import { openCard } from "./card.js";
 
-export const otherBoards = () => state.boards.filter((b) => b.id !== state.board?.id);
+export const otherBoards = () => state.boards.filter((b) => b.id !== state.board?.id && !b.archivedAt);
 
 // The panel that opens under the card's buttons. `flush` saves whatever the card view still holds first, so
 // nothing typed on the card is left behind.

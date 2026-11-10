@@ -16,6 +16,8 @@ export function openEverywhere() {
   const box = h("input", { type: "search", id: "everywhere-search", value: state.query, maxLength: 500, autocomplete: "off", spellcheck: false,
     "aria-label": "Search every board", "aria-describedby": "everywhere-status" });
   const status = h("p", { class: "hint", id: "everywhere-status", "aria-live": "polite" });
+  const shelved = state.boards.filter((b) => b.archivedAt).length;
+  const archived = h("input", { type: "checkbox", id: "everywhere-archived", onchange: () => run() });
   const error = h("div", { class: "search-error", hidden: true });
   const list = h("div", { class: "everywhere" });
   const boards = new Map();  // other boards, fetched once while this is open, for their card titles
@@ -64,7 +66,8 @@ export function openEverywhere() {
     }
     status.textContent = "Searching…";
     try {
-      const data = await api("GET", `/api/search?${new URLSearchParams({ q: query, sort })}`, undefined, undefined, signal);
+      const params = new URLSearchParams({ q: query, sort, archivedBoards: archived.checked ? "1" : "0" });
+      const data = await api("GET", `/api/search?${params}`, undefined, undefined, signal);
       await Promise.all(data.results.filter((r) => r.board !== state.board?.id && !boards.has(r.board)).map(async (r) => {
         try {
           boards.set(r.board, (await api("GET", `/api/boards/${encodeURIComponent(r.board)}`, undefined, undefined, signal)).board);
@@ -97,6 +100,7 @@ export function openEverywhere() {
   showSheet("everywhere", null, h("div", { class: "form" },
     sheetHead("Search every board"),
     box,
+    shelved > 0 && h("label", { class: "check-line" }, archived, `Include archived boards (${shelved})`),
     sort.trim() && h("p", { class: "hint", text: "Sorted as this board is. A board without what it sorts by keeps its own order." }),
     status, error, list), { onClose: () => { clearTimeout(timer); controller?.abort(); } });
   box.focus();

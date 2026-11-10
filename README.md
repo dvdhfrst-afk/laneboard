@@ -136,6 +136,22 @@ time to see the keyboard shortcuts and where your data is.
 - **New board** starts empty or from a template: the built-in ones, or your own. **Save as
   template** in **More** keeps a board's setup as a template, with its cards if you like, and
   **Templates** in **More** renames, describes and deletes the ones you saved.
+- **All boards** (at the end of the board picker, in **More**, or at the address `#/boards`) is the
+  boards overview: every board with its description, how many cards it has, how many are done and
+  not done, and a bar of what each column holds. From there you open, rename, duplicate, export,
+  archive or restore, and delete boards (deleting asks first, and a backup is kept), and **Move up**
+  and **Move down** set the order boards are listed in everywhere: the order of the boards in the file.
+- **Archive this board** in **More**, or **Archive** on the overview, puts a board out of the way
+  without deleting anything. Archived boards are listed under **Archived boards** on the overview.
+  They leave the board picker, **Move to board** and **Search every board** (which has a tick box to
+  include them), and they still open by their address, export and delete. An archived board says so
+  at its top, with **Restore board**.
+- **Backups** in **More** lists the copies Laneboard keeps of your file and restores one (see
+  [Backups](#backups)).
+- **Ctrl+K** (Cmd+K on a Mac) opens the command palette. Type to find an action (the header buttons,
+  everything in **More**, and what the keyboard shortcuts do), another board, or a card on this board
+  by key or title; Up and Down choose, Enter runs or opens it, and Esc closes it. It works from
+  anywhere on the page, even while typing in a box, and asks before leaving a form you have changed.
 - Collapsing a column is remembered in that browser. It isn't saved in your boards file.
 
 Columns show the first 300 cards with a button for more, so a very long column stays quick.
@@ -144,6 +160,7 @@ Columns show the first 300 cards with a button for more, so a very long column s
 
 | Key | Does |
 |---|---|
+| Ctrl + K or Cmd + K | Command palette: find any action, a board or a card, and run or open it |
 | `n` | New card |
 | `/` | Search |
 | `s` | Sort |

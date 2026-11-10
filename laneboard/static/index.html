@@ -28,6 +28,7 @@
     </div>
   </header>
   <p class="desc" id="board-desc" hidden></p>
+  <div class="archived-note" id="board-archived" role="status" hidden></div>
   <div class="welcome" id="welcome" hidden></div>
 
   <div class="tools" id="tools" hidden>
@@ -51,9 +52,11 @@
     <div class="filters" id="filters" role="group" aria-label="Filter cards"></div>
   </div>
 
-  <div class="board-wrap">
+  <div class="board-wrap" id="board-wrap">
     <main class="board" id="board"></main>
   </div>
+
+  <section class="overview" id="overview" aria-label="All boards" hidden></section>
 
   <section class="groups" id="groups" hidden>
     <h2 id="groups-title">Groups</h2>
