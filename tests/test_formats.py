@@ -845,6 +845,9 @@ class TrelloImport(unittest.TestCase):
         self.assertEqual(bad(lambda d: d.update(labels={})), "That Trello export: labels must be a list, not an object.")
         self.assertEqual(bad(lambda d: d["customFields"][3].update(options=[None])),
                          "Custom field 4 in that Trello export: entry 1 of options is empty, not an object.")
+        for value, kind in ((5, "a number"), (True, "true or false")):
+            self.assertEqual(bad(lambda d: d["cards"][1].update(customFieldItems=value)),
+                             f"Card 2 in that Trello export: customFieldItems must be a list, not {kind}.")
         data = fixture_json("trello-board.json")
         data["cards"][0]["idLabels"] = [["unhashable"], None, 7]
         data["cards"][1]["customFieldItems"][1]["value"] = {"number": "lots"}

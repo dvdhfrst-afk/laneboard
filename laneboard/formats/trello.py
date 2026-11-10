@@ -59,9 +59,9 @@ class _Fields:
     def __init__(self, data, cards, fit):
         self.fit, self.skipped, self.bad, self.rounded = fit, [], 0, 0
         places = {}  # field id -> the most decimal places any card's value has
-        for card in cards:
-            for item in card.get("customFieldItems") or []:
-                if isinstance(item, dict) and isinstance(item.get("value"), dict) and _id(item.get("idCustomField")):
+        for n, card in enumerate(cards, 1):
+            for item in objects(card.get("customFieldItems"), f"Card {n} in that Trello export", "customFieldItems"):
+                if isinstance(item.get("value"), dict) and _id(item.get("idCustomField")):
                     found = _decimals(item["value"].get("number"))
                     if found is not None:
                         places[item["idCustomField"]] = max(places.get(item["idCustomField"], 0), found)
