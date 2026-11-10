@@ -5,7 +5,7 @@ import { countBy, pairsText, parsePairs, plural } from "./util.js";
 import { $, closeSheet, confirmBox, field, h, sheetHead, showSheet, tabs, toast } from "./dom.js";
 import { api, loadBoards, send } from "./api.js";
 import { goToBoard, route } from "./nav.js";
-import { chooseImportFile } from "./transfer.js";
+import { openImport } from "./transfer.js";
 import { faceTab, labelsTab, propertiesTab } from "./boardparts.js";
 import { templateChoices } from "./templates.js";
 
@@ -283,7 +283,7 @@ export function openNewBoard(templateId = null) {
     templateChoices(picked, templateId),
     error,
     h("div", { class: "form-actions" }, submit, h("button", { type: "button", text: "Cancel", onclick: () => closeSheet() })),
-    h("div", { class: "start-actions" }, h("button", { type: "button", text: "Import a file", onclick: chooseImportFile })),
+    h("div", { class: "start-actions" }, h("button", { type: "button", text: "Import a file", onclick: openImport })),
     startingPoints());
   showSheet("new-board", null, h("div", { class: "form" }, sheetHead("New board"), form));
 }

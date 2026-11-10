@@ -8,8 +8,9 @@ import { drawPlan, matchCount, renderTools, searchSoon } from "./search.js";
 import { openCard, progress } from "./card.js";
 import { openCardForm } from "./cardform.js";
 import { openNewBoard, startingPoints } from "./settings.js";
-import { chooseImportFile } from "./transfer.js";
+import { openImport } from "./transfer.js";
 import { labelChips } from "./labels.js";
+import { renderSummary } from "./summary.js";
 import { propFace } from "./properties.js";
 
 const COLUMN_PAGE = 300;   // cards drawn per column before a "show more" button; keeps huge boards quick
@@ -34,6 +35,7 @@ export function render() {
   $("#new-card").disabled = !b;
   $("#board-settings").disabled = !b;
   $("#tools").hidden = !b;
+  renderSummary();
   if (!b) {
     $("#groups").hidden = true;
     $("#welcome").hidden = true;
@@ -66,7 +68,7 @@ function renderEmpty() {
     h("p", { text: "There are no boards yet." }),
     h("div", { class: "start-actions" },
       h("button", { type: "button", class: "primary", text: "Create a board", onclick: () => openNewBoard() }),
-      h("button", { type: "button", text: "Import a file", onclick: chooseImportFile })),
+      h("button", { type: "button", text: "Import a file", onclick: openImport })),
     startingPoints()));
 }
 

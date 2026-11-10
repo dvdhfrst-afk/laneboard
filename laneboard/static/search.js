@@ -91,7 +91,7 @@ export function sortActive(query = state.query, sort = state.sort) {
 }
 
 // A value as the search takes it: in quotes when it has spaces, brackets or quotes in it.
-const quoted = (value) => (/[\s()"]/.test(value) || !value ? `"${value.replace(/["\\]/g, "\\$&")}"` : value);
+export const quoted = (value) => (/[\s()"]/.test(value) || !value ? `"${value.replace(/["\\]/g, "\\$&")}"` : value);
 const unquoted = (value) => (value.startsWith('"') ? value.slice(1, -1).replace(/\\(["\\])/g, "$1") : value);
 const optionsOf = (family) => (family === "label" ? state.board.labels : state.board.groups);
 
@@ -105,7 +105,21 @@ function entryText(family, id) {
   if (family === "blocked") return "is:blocked";
   if (family === "group" && id === "") return "-has:group";
   const options = optionsOf(family);
-  return `${family}:${quoted(nameFor(options.find((o) => o.id === id), options))}`;
+  return qualifierFor(family, options.find((o) => o.id === id), options);
+}
+
+// A qualifier for one of a list of things with ids and names (columns, groups, labels, a property's choices), like
+// label:Bug or column:"In progress".
+export const qualifierFor = (qualifier, option, options) => `${qualifier}:${quoted(nameFor(option, options))}`;
+
+const QUALIFIER_NAMES = ["column", "col", "group", "label", "labels", "key", "title", "notes", "is", "has", "tasks", "progress", "sort"];
+
+// How a search names a property: by its name with hyphens for spaces, like story-points, or by its id when the name
+// can't be written that way or could be taken for a qualifier or another property.
+export function propertyName(prop) {
+  const name = prop.name.trim().replace(/[\s_-]+/g, "-");
+  const clash = QUALIFIER_NAMES.includes(fold(name)) || state.board.properties.some((p) => p !== prop && fold(p.id) === fold(name));
+  return !clash && /^\p{L}[\p{L}\p{N}-]*$/u.test(name) ? name : prop.id;
 }
 
 // The chip a single term stands for: {family, id}, or null.

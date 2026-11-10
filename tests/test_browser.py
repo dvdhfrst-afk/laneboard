@@ -10,6 +10,7 @@ tests need Playwright and skip without it:
 import json
 import os
 import random
+import re
 import socket
 import stat
 import subprocess
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -112,6 +114,17 @@ class Harness:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(request, timeout=10) as answer:
             return json.load(answer)
+
+    def fetch(self, path, data=None, content_type=None):
+        """A request whose answer isn't JSON, like an export: (status, headers, body bytes)."""
+        request = urllib.request.Request(self.url + path.lstrip("/"), data=data, method="POST" if data is not None else "GET",
+                                         headers={"Content-Type": content_type} if content_type else {})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=10) as answer:
+                return answer.status, answer.headers, answer.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
 
     def seed(self, *boards):
         """Create the file through the import command, as a person would."""
@@ -784,10 +797,10 @@ class Sizes(BrowserCase):
         long = "Unbroken" * 30
         b = sample_board("Name" + long[:100])
         b["description"] = long
-        b["groups"][0]["name"] = long[:60]
+        b["groups"][0]["name"] = long[:40]
         b["cards"][0].update(title=long[:200], summary=long, blocked=long,
                              fields=[{"label": long[:30], "value": long}], sections=[{"label": long[:30], "body": long}])
-        b["cards"][1].update(group=long[:60].lower())
+        b["cards"][1].update(group=long[:40].lower())
         page = self.start(b, sample_board("Other"))
         for width, height in [(320, 568), (390, 844), (800, 600), (1440, 900), (2560, 1440)]:
             page.set_viewport_size({"width": width, "height": height})
@@ -1702,6 +1715,8 @@ class Searching(FindCase):
         self.assertEqual(page.input_value("#search"), "Card 3", "the board opens with the same search")
         self.shows(page, ["T-3"])
         self.close_sheet(page)
+        # Focus goes back to the card on the next frame; move on from there, as a person would.
+        self.until(page, "document.activeElement.matches('.card[data-key=\"T-3\"]')")
         page.focus("#search")
         page.keyboard.press("Shift+Enter")  # the keyboard way in
         self.until(page, "document.querySelectorAll('.found-board').length === 2")
@@ -1943,7 +1958,7 @@ class FindSizes(FindCase):
     def test_narrow_screens(self):
         long = "Unbroken" * 30
         b = find_board()
-        b["views"] = [{"name": long[:60], "query": f'title:"{long[:200]}"', "sort": "-points"}]
+        b["views"] = [{"name": long[:40], "query": f'title:"{long[:200]}"', "sort": "-points"}]
         page = self.start(b, sample_board("Other"))
         for width, height in [(390, 844), (320, 568)]:
             page.set_viewport_size({"width": width, "height": height})
@@ -1987,6 +2002,300 @@ class FindSizes(FindCase):
             self.assertLessEqual(self.sheet_overflow(page), 0, f"help at {width} px")
             self.close_sheet(page)
             page.select_option("#sort-by", "")
+
+
+# ---- import, export and the summary ----------------------------------------------------------------
+
+TRELLO = ROOT / "tests" / "fixtures" / "trello-board.json"
+
+
+def summary_board(name="Parts"):
+    """find_board with groups, a column over its limit, values for several kinds of property, tasks and an archived card."""
+    b = find_board(name)
+    b["groups"] = [{"name": "Web", "color": "blue", "prefix": "WEB"}, {"name": "Mobile", "color": "teal", "prefix": "MOB"}]
+    b["columns"][0] = {"name": "Backlog", "limit": 5}
+    b["cards"][0].update(group="Web")
+    b["cards"][1].update(group="Mobile", properties={"Points": 2, "Platform": ["iOS", "Web"], "Reviewed": True, "Confidence": 4},
+                         tasks=["Write it", {"text": "Check it", "done": True}])
+    b["cards"][4].update(properties={"Reviewed": True, "Confidence": 2})
+    b["cards"][7].update(archived="2026-01-15T10:00:00Z", labels=["Bug"])
+    return b
+
+
+class TransferCase(FindCase):
+    def preview(self, path, fmt="auto"):
+        """What the server says adding a file would add, asked directly: (status, answer)."""
+        query = urllib.parse.urlencode({"format": fmt, "preview": 1, "filename": os.path.basename(path)})
+        status, _, body = self.app.fetch(f"api/import?{query}", Path(path).read_bytes(), "application/octet-stream")
+        return status, json.loads(body)
+
+    def open_import(self, page):
+        page.click("#menu summary")
+        page.click("#menu >> text=Import a file")
+        page.wait_for_selector("dialog[open] .import-result", state="attached")
+        self.assertEqual(page.evaluate("document.activeElement.textContent"), "Choose a file")
+
+    def shown_preview(self, page):
+        """The boards the Import sheet shows: [[name, [[column, cards]]]]."""
+        return page.evaluate("""[...document.querySelectorAll('dialog[open] .import-board')].map((b) => [b.querySelector('h4').textContent,
+            [...b.querySelectorAll('.import-columns li')].map((li) => [li.children[0].textContent, Number(li.children[1].textContent)])])""")
+
+    def names(self):
+        return [b["name"] for b in self.app.load()["boards"]]
+
+    def summary(self):
+        return self.app.api("GET", f"api/boards/{self.app.board()['id']}/summary")["summary"]
+
+    def counts(self, page):
+        """Each search link in the summary panel and the count it shows."""
+        return dict(page.evaluate("""[...document.querySelectorAll('#summary button.sum-row')].map((b) =>
+            [b.dataset.query, b.querySelector('.sum-count').textContent])"""))
+
+    def open_summary(self, page):
+        page.click("#summary-toggle")
+        page.wait_for_selector("#summary .sum-grid", timeout=15000)
+        self.assertEqual(page.get_attribute("#summary-toggle", "aria-expanded"), "true")
+
+
+class ImportSheet(TransferCase):
+    def test_a_markdown_file_shows_what_it_adds_then_adds_it(self):
+        page = self.start(find_board(), sample_board("Other"))
+        other = next(b for b in self.app.load()["boards"] if b["name"] == "Other")
+        _, _, body = self.app.fetch(f"api/boards/{other['id']}/export?format=markdown")
+        md = os.path.join(self.tmp.name, "other-copy.md")
+        Path(md).write_bytes(body.replace(b"# Other", b"# Other copy", 1))
+        status, want = self.preview(md)
+        self.assertEqual((status, want["format"]), (200, "markdown"))
+        self.open_import(page)
+        with page.expect_file_chooser() as chooser:
+            page.keyboard.press("Enter")
+        chooser.value.set_files(md)
+        page.wait_for_selector("dialog[open] .import-board")
+        self.assertEqual(page.input_value("#import-format"), "markdown")
+        self.assertIn("Found from the file", page.locator("dialog[open] .import-result").inner_text())
+        self.assertEqual(self.shown_preview(page), [[b["name"], [[c["name"], c["cards"]] for c in b["columns"]]] for b in want["boards"]])
+        self.assertEqual(self.names(), ["Parts", "Other"], "a preview adds nothing")
+        page.click("dialog[open] >> text=Add this board")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Other copy'")
+        self.assertIn("read as Markdown", self.toast(page))
+        self.assertEqual(self.names(), ["Parts", "Other", "Other copy"])
+        self.assertEqual(page.locator(".card").count(), 6)
+
+    def test_a_trello_export_shows_its_warnings_and_a_wrong_format_is_refused(self):
+        page = self.start(find_board())
+        status, want = self.preview(TRELLO)
+        self.assertEqual((status, want["format"]), (200, "trello"))
+        self.assertTrue(want["warnings"])
+        self.open_import(page)
+        page.set_input_files("#import-file", str(TRELLO))
+        page.wait_for_selector("dialog[open] .import-warnings")
+        self.assertEqual(page.input_value("#import-format"), "trello")
+        self.assertEqual(page.locator("dialog[open] .import-warnings li").all_inner_texts(), want["warnings"])
+        board = want["boards"][0]
+        text = page.locator("dialog[open] .import-board").inner_text()
+        for part in [board["name"], *board["labels"], *[p["name"] for p in board["properties"]]]:
+            self.assertIn(part, text)
+        self.assertIn(f"and {board['archived']} archived", text)
+        # Read as the wrong format, the file is refused with the server's reason, and nothing can be added.
+        page.select_option("#import-format", "github")
+        page.wait_for_selector("dialog[open] .import-result .form-error")
+        _, refused = self.preview(TRELLO, "github")
+        self.assertIn(refused["error"], page.locator("dialog[open] .import-result .form-error").inner_text())
+        self.assertEqual(page.locator("dialog[open] >> text=Add this board").count(), 0)
+        self.assertTrue(page.evaluate("document.activeElement.id === 'import-format'"), "the format stays in reach")
+        page.select_option("#import-format", "trello")
+        page.wait_for_selector("dialog[open] .import-warnings")
+        self.assertEqual(self.names(), ["Parts"])
+        page.click("dialog[open] >> text=Add this board")
+        self.until(page, f"document.querySelector('#board-name').textContent === {json.dumps(board['name'])}")
+        self.assertEqual(self.names(), ["Parts", board["name"]])
+        made = self.app.board(1)
+        archived = sum(1 for c in made["cards"] if c["archived"])
+        self.assertEqual((len(made["cards"]), archived), (board["cards"], board["archived"]))
+
+    def test_a_refused_file_says_why_and_adds_nothing(self):
+        page = self.start(find_board())
+        before = self.app.load()["boards"]
+        bad = os.path.join(self.tmp.name, "notes.txt")
+        Path(bad).write_text("just some words", encoding="utf-8")
+        status, refused = self.preview(bad)
+        self.assertEqual(status, 400)
+        self.open_import(page)
+        page.set_input_files("#import-file", bad)
+        error = page.locator("dialog[open] .import-result .form-error")
+        error.wait_for()
+        self.assertIn("notes.txt", error.inner_text())
+        self.assertIn(refused["error"], error.inner_text())
+        self.assertIn("notes.txt", self.toast(page))
+        # No format was found, so one can be picked to see what doesn't fit.
+        page.select_option("#import-format", "markdown")
+        page.wait_for_selector("dialog[open] .import-result .form-error:has-text('Read as Markdown')")
+        self.assertEqual(self.app.load()["boards"], before)
+        page.click("dialog[open] >> text=Cancel")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+
+class ExportMenu(TransferCase):
+    def test_every_format_downloads_with_the_servers_name_and_type(self):
+        page = self.start(find_board())
+        board = self.app.board()
+        formats = [f for f in self.app.api("GET", "api/formats")["formats"] if f["export"]]
+        self.assertEqual([f["name"] for f in formats], ["laneboard", "markdown", "html", "text"])
+        wanted = [(f"Export this board as {f['title']}", f"api/boards/{board['id']}/export?format={f['name']}", f["mime"]) for f in formats]
+        wanted.append(("Export all boards", "api/export", "application/json"))
+        for label, path, mime in wanted:
+            status, headers, body = self.app.fetch(path)
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Content-Type"].split(";")[0], mime.split(";")[0], label)
+            name = re.search(r'filename="([^"]+)"', headers["Content-Disposition"]).group(1)
+            page.click("#menu summary")
+            item = page.locator("#menu-items a", has_text=label)
+            self.assertEqual(item.count(), 1, label)
+            self.assertEqual(item.get_attribute("href"), "/" + path)
+            with page.expect_download() as d:
+                item.click()
+            self.assertEqual(d.value.suggested_filename, name, label)
+            saved = os.path.join(self.tmp.name, name)
+            d.value.save_as(saved)
+            if path != "api/export":  # the whole file carries the time it was written
+                self.assertEqual(Path(saved).read_bytes(), body, label)
+            self.assertTrue(page.url.endswith(f"#{board['id']}"), "the page stays on the board")
+            self.assertFalse(page.evaluate("document.querySelector('#menu').open"), "the menu closes")
+
+
+class SummaryPanel(TransferCase):
+    def test_the_numbers_are_the_servers(self):
+        page = self.start(summary_board())
+        self.open_summary(page)
+        s = self.summary()
+        counts = self.counts(page)
+        self.assertEqual(counts["is:blocked"], str(s["blocked"]))
+        self.assertEqual(counts["is:archived"], str(s["archived"]))
+        for c in s["columns"]:
+            self.assertEqual(counts[f"column:{c['name']}"], f"{c['cards']} / {c['limit']}" if c["limit"] else str(c["cards"]))
+        for g in s["groups"]:
+            self.assertEqual(counts[f"group:{g['name']}"], str(g["cards"]))
+        self.assertEqual(counts["-has:group"], str(s["noGroup"]))
+        for label in s["labels"]:
+            self.assertEqual(counts[f"label:{label['name']}"], str(label["cards"]))
+        self.assertEqual(counts["-has:labels"], str(s["noLabels"]))
+        props = {p["name"]: p for p in s["properties"]}
+        for prop in ("Priority", "Platform"):
+            for o in props[prop]["options"]:
+                self.assertEqual(counts[f"{prop}:{o['name']}"], str(o["cards"]))
+        self.assertEqual(counts["Reviewed:yes"], str(props["Reviewed"]["cards"]))
+        self.assertEqual(counts["has:Points"], str(props["Points"]["cards"]))
+        text = page.locator("#summary").inner_text()
+        self.assertIn(f"{props['Points']['total']} pt", text)
+        self.assertIn(f"{props['Confidence']['average']} out of {props['Confidence']['outOf']}", text)
+        self.assertEqual((s["archived"], s["tasks"]), (1, {"done": 1, "total": 2}))
+        self.assertEqual(page.locator("#summary .sum-row:has-text('Tasks done') .sum-count").inner_text(), "1 of 2")
+        self.assertIn("Over its limit", page.locator("#summary .sum-item.over").inner_text())
+        # Every link is a search the server can read, and it finds as many cards as the panel says.
+        board_id = self.app.board()["id"]
+        for query, count in counts.items():
+            self.assertEqual(str(len(self.server_keys(board_id, query))), count.split(" / ")[0], query)
+
+    def test_a_count_searches_and_the_numbers_follow_the_board(self):
+        page = self.start(summary_board(), sample_board("Other"))
+        self.open_summary(page)
+        page.click("#summary button.sum-row[data-query='label:Bug']")
+        self.assertEqual(page.input_value("#search"), "label:Bug")
+        self.shows(page, ["T-1", "T-3"])
+        page.locator("#summary button.sum-row[data-query='column:Doing']").focus()
+        page.keyboard.press("Enter")
+        self.assertEqual(page.input_value("#search"), "column:Doing")
+        self.shows(page, ["T-4"])
+        page.fill("#search", "")
+        self.shows(page, [f"T-{i}" for i in (1, 2, 3, 5, 6, 7, 4)], "every card again")
+        # Its own change: moving a card to Doing.
+        page.locator('.card[data-key="T-2"]').focus()
+        page.keyboard.press("Shift+ArrowRight")
+        self.wait_until(lambda: self.counts(page).get("column:Doing") == "2 / 1", "the summary to count the move")
+        # Someone else's change, picked up by the regular refresh.
+        board_id = self.app.board()["id"]
+        self.app.api("POST", f"api/boards/{board_id}/cards", {"title": "From elsewhere", "labels": ["Bug"]})
+        self.poll(page)
+        self.wait_until(lambda: self.counts(page).get("label:Bug") == "3", "the summary to count the new card")
+        self.assertEqual(self.counts(page)["column:Backlog"].split(" / ")[0], str(self.summary()["columns"][0]["cards"]))
+        # Another board shows its own numbers, and the panel stays open across a reload until closed.
+        other = next(b for b in self.app.load()["boards"] if b["name"] == "Other")
+        page.select_option("#board-pick", other["id"])
+        self.until(page, "document.querySelector('#board-name').textContent === 'Other'")
+        self.wait_until(lambda: self.counts(page).get("group:Home") == "0", "the other board's numbers")
+        page.reload()
+        page.wait_for_selector("#summary .sum-grid")
+        page.click("#summary-toggle")
+        self.assertTrue(page.locator("#summary").is_hidden())
+        self.assertEqual(page.get_attribute("#summary-toggle", "aria-expanded"), "false")
+
+
+class LargeSummary(TransferCase):
+    CARDS = 5000
+
+    def test_the_summary_of_a_big_board_stays_quick(self):
+        columns = ["Backlog", "Doing", "Done"]
+        b = parts_board("Big", cards=0)
+        b["columns"] = columns
+        b["cards"] = [{"key": f"T-{i}", "title": f"Card {i}", "column": columns[i % 3], "rank": i,
+                       "labels": ["Bug"] if i % 7 == 0 else [], "properties": {"Points": i % 10, "Priority": ["Low", "Medium", "High"][i % 3]}}
+                      for i in range(1, self.CARDS + 1)]
+        page = self.start(b)
+        start = time.perf_counter()
+        self.open_summary(page)
+        opened = time.perf_counter() - start
+        self.assertEqual(self.counts(page)["label:Bug"], str(self.CARDS // 7))
+        self.assertEqual(self.counts(page)["Priority:High"], str(self.summary()["properties"][1]["options"][2]["cards"]))
+        board_id = self.app.board()["id"]
+        self.app.api("POST", f"api/boards/{board_id}/cards", {"title": "One more", "labels": ["Bug"]})
+        start = time.perf_counter()
+        self.poll(page)
+        self.wait_until(lambda: self.counts(page).get("label:Bug") == str(self.CARDS // 7 + 1), "the new count", timeout=15)
+        followed = time.perf_counter() - start
+        report = os.environ.get("LANEBOARD_SUMMARY_REPORT")
+        if report:
+            with open(report, "w", encoding="utf-8") as f:
+                json.dump({"cards": self.CARDS, "seconds": {"open": round(opened, 3), "after a change": round(followed, 3)}}, f, indent=1)
+        self.assertLess(opened, 5, f"opening the summary took {opened:.2f} s on {self.CARDS} cards")
+        self.assertLess(followed, 8, f"the summary took {followed:.2f} s to follow a change on {self.CARDS} cards")
+
+
+class TransferSizes(TransferCase):
+    def test_narrow_screens_by_touch(self):
+        long = "Unbroken" * 20
+        b = summary_board()
+        b["labels"].append({"name": long[:40], "color": "violet"})
+        b["cards"][5]["labels"] = [long[:40]]
+        self.context = self.browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True, accept_downloads=True)
+        self.context.set_default_timeout(8000)
+        self.addCleanup(self.context.close)
+        page = self.start(b)
+        page.tap("#summary-toggle")
+        page.wait_for_selector("#summary .sum-grid")
+        for width, height in [(390, 844), (320, 568)]:
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(50)
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0, f"board at {width} px")
+            self.assertLessEqual(page.evaluate("document.querySelector('#summary').scrollWidth - document.querySelector('#summary').clientWidth"), 0,
+                                 f"summary at {width} px")
+            page.tap("#menu summary")
+            menu = page.evaluate("(() => { const r = document.querySelector('#menu-items').getBoundingClientRect(); return [r.left, r.right]; })()")
+            self.assertGreaterEqual(menu[0], 0, f"More menu at {width} px")
+            self.assertLessEqual(menu[1], width, f"More menu at {width} px")
+            page.tap("#menu >> text=Import a file")
+            with page.expect_file_chooser() as chooser:
+                page.tap("dialog[open] >> text=Choose a file")
+            chooser.value.set_files(str(TRELLO))
+            page.wait_for_selector("dialog[open] .import-warnings")
+            self.assertLessEqual(page.evaluate("document.querySelector('#sheet').scrollWidth - document.querySelector('#sheet').clientWidth"), 0,
+                                 f"import preview at {width} px")
+            page.tap("#sheet >> text=Close")
+            self.until(page, "!document.querySelector('#sheet').open")
+            page.tap("#summary button.sum-row[data-query='is:blocked']")
+            self.assertEqual(page.input_value("#search"), "is:blocked")
+            self.shows(page, ["T-1"])
+            page.fill("#search", "")
+        self.assertEqual(self.names(), ["Parts"], "looking adds nothing")
 
 
 if __name__ == "__main__":

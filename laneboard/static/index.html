@@ -43,6 +43,7 @@
         <select id="sort-by"></select>
         <button type="button" id="sort-dir" hidden></button>
       </div>
+      <button type="button" id="summary-toggle" aria-expanded="false" aria-controls="summary">Summary</button>
       <span class="search-count" id="search-count"></span>
       <button type="button" class="link" id="search-all" hidden>Search every board</button>
     </div>
@@ -50,6 +51,8 @@
     <p class="sort-hint" id="sort-hint" hidden></p>
     <div class="filters" id="filters" role="group" aria-label="Filter cards"></div>
   </div>
+
+  <section class="summary" id="summary" aria-labelledby="summary-title" hidden></section>
 
   <div class="board-wrap">
     <main class="board" id="board"></main>
@@ -63,7 +66,7 @@
   <footer class="foot"><span id="version">Laneboard</span>. Your boards stay on this computer. Press ? for keyboard shortcuts.</footer>
 </div>
 
-<input type="file" id="import-file" accept=".json,application/json" hidden>
+<input type="file" id="import-file" accept=".json,.md,.markdown,application/json,text/markdown" hidden>
 
 <dialog class="sheet" id="sheet" aria-labelledby="sheet-title">
   <div class="sheet-inner" id="sheet-body"></div>
