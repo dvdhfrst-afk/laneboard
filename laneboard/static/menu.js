@@ -6,6 +6,7 @@ import { openArchive } from "./archive.js";
 import { duplicateBoard } from "./settings.js";
 import { chooseImportFile } from "./transfer.js";
 import { openHelp } from "./help.js";
+import { openSaveTemplate, openTemplates } from "./templates.js";
 
 export function renderMenu() {
   const b = state.board;
@@ -15,8 +16,10 @@ export function renderMenu() {
     item(`Archived cards (${index.archived.length})`, openArchive),
     link("Export this board", `/api/boards/${b.id}/export`),
     item("Duplicate this board", duplicateBoard),
+    item("Save as template", openSaveTemplate),
   ] : [];
   $("#menu-items").replaceChildren(...boardItems,
+    item("Templates", openTemplates),
     link("Export all boards", "/api/export"),
     item("Import a file", chooseImportFile),
     item("Keyboard shortcuts and help", openHelp));

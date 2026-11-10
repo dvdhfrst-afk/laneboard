@@ -13,6 +13,7 @@ shared over a network. If several people need the same board, use something else
 - Drag cards between columns, or move them with the keyboard or the buttons on a card
 - Search with a small search language, sort the columns, and keep searches as saved views
 - Collapse columns, and flag a column that holds too many cards
+- Start a board from a template, built in or saved from a board of your own
 - Archive cards to get them out of the way without losing them; duplicate cards and boards
 - Import and export from the page or the command line, and a command line for scripts
 - Changes save as you make them. Edits made in two tabs don't silently overwrite each other
@@ -128,6 +129,9 @@ time to see the keyboard shortcuts and where your data is.
   any time. When the search or sort has moved on, **Views** offers to update the view. **Manage
   views** renames, changes and removes views, and picks the one the board opens with. The address
   always holds the search and sort, so a reload or a bookmark opens the board the same way.
+- **New board** starts empty or from a template: the built-in ones, or your own. **Save as
+  template** in **More** keeps a board's setup as a template, with its cards if you like, and
+  **Templates** in **More** renames, describes and deletes the ones you saved.
 - Collapsing a column is remembered in that browser. It isn't saved in your boards file.
 
 Columns show the first 300 cards with a button for more, so a very long column stays quick.

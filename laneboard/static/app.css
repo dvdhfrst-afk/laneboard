@@ -357,11 +357,27 @@ kbd { font-family: var(--mono); font-size: 0.85em; background: var(--sunk); bord
 }
 
 
-/* saved views, searching every board */
+/* saved views, templates, searching every board */
 .check-line { display: flex; gap: 8px; align-items: center; cursor: pointer; min-width: 0; }
 .check-line input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
 .view-row .opens { align-self: end; padding-bottom: 6px; }
-.view-row .mini { flex-wrap: wrap; align-items: center; }
+.view-row .mini, .template-row .mini { flex-wrap: wrap; align-items: center; }
+.mini .spacer { flex: 1; }
+.template-pick { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+.template-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.template-choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.template-choice input { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); }
+.template-text { display: grid; gap: 1px; min-width: 0; }
+.template-name { font-weight: 600; overflow-wrap: anywhere; }
+.tag { display: inline-block; font-size: 0.68rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; vertical-align: 1px; white-space: nowrap; }
+.tag.own { color: var(--accent); border-color: var(--accent); }
+.counts { font-family: var(--mono); font-size: 0.75rem; }
+.template-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; justify-content: space-between; min-width: 0; }
+.template-row h3 { font-size: 0.95rem; font-weight: 620; }
+.template-about { margin: 0; overflow-wrap: anywhere; }
+.list-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 650; margin-top: 6px; }
 .everywhere { display: grid; gap: 14px; min-width: 0; }
 .found-board h3 { font-size: 0.95rem; font-weight: 620; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; overflow-wrap: anywhere; }
 .found-cards { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; }

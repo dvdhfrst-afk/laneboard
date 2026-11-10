@@ -7,6 +7,7 @@ import { api, loadBoards, send } from "./api.js";
 import { goToBoard, route } from "./nav.js";
 import { chooseImportFile } from "./transfer.js";
 import { faceTab, labelsTab, propertiesTab } from "./boardparts.js";
+import { templateChoices } from "./templates.js";
 
 const POLICIES = [["warn", "Flag the column, and still take cards"], ["refuse", "Take no more cards until one leaves"]];
 
@@ -244,9 +245,21 @@ export function openSettings() {
   showSheet("settings", null, h("div", { class: "form" }, sheetHead("Board settings"), parts.bar, form));
 }
 
-export function openNewBoard() {
+// A new board, empty or from a template (`templateId` picks one to start on). With a template, an empty name takes the
+// template's, and the description starts as the template's until something else is typed there.
+export function openNewBoard(templateId = null) {
   const name = h("input", { maxLength: 120, autofocus: true, placeholder: "Client work" });
   const desc = h("textarea", { rows: 2, maxLength: 1000 });
+  const nameHint = h("span", { class: "hint" });
+  let template = null;
+  let ownDesc = false;
+  desc.addEventListener("input", () => { ownDesc = !!desc.value; });
+  const picked = (t) => {
+    template = t;
+    name.placeholder = t ? t.name : "Client work";
+    nameHint.textContent = t ? `Leave it empty to call the board ${t.name}.` : "";
+    if (!ownDesc) desc.value = t?.description || "";
+  };
   const error = h("div", { class: "form-error", role: "alert" });
   const submit = h("button", { type: "submit", class: "primary", text: "Create board" });
   const onsubmit = async (e) => {
@@ -254,9 +267,10 @@ export function openNewBoard() {
     error.textContent = "";
     submit.disabled = true;
     try {
-      const { board } = await api("POST", "/api/boards", { name: name.value, description: desc.value });
+      const { board } = await api("POST", "/api/boards", { name: name.value, description: desc.value, ...(template ? { template: template.id } : {}) });
       await goToBoard(board.id);
-      toast("Board created. Use Board settings to change its columns and add groups.");
+      toast(template ? `Made ${board.name} from the template ${template.name}. Board settings changes any of it.`
+        : "Board created. Use Board settings to change its columns and add groups.");
     } catch (err) {
       error.textContent = err.message;
     } finally {
@@ -264,9 +278,9 @@ export function openNewBoard() {
     }
   };
   const form = h("form", { class: "form", novalidate: true, oninput: () => { sheet.dirty = true; }, onsubmit },
-    field("Board name", name),
+    h("label", { class: "field" }, h("span", { class: "lbl", text: "Board name" }), name, nameHint),
     field("Description", desc, "Optional. Shows under the board name."),
-    h("p", { class: "hint", text: "New boards start with Backlog, Ready, In progress, Review and Done. You can change them later." }),
+    templateChoices(picked, templateId),
     error,
     h("div", { class: "form-actions" }, submit, h("button", { type: "button", text: "Cancel", onclick: () => closeSheet() })),
     h("div", { class: "start-actions" }, h("button", { type: "button", text: "Import a file", onclick: chooseImportFile })),
