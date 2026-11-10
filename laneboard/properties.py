@@ -601,19 +601,25 @@ TYPES = {kind.name: kind for kind in (TextType(), NumberType(), ChoiceType(), Mu
 # ---- a board's properties ------------------------------------------------------------------------
 
 
-def find_property(board, name_or_id):
+def find_property(board, name_or_id, names_first=False):
     """The property with this id, or else this name ignoring case, spaces and hyphens. None if there's none.
 
     An exact id wins over a name, so ids sent by the page always mean the same property even after
-    renames; `story-points` and `Story Points` both find a property named "Story points".
+    renames; `story-points` and `Story Points` both find a property named "Story points". With
+    `names_first`, for what a person types, a name wins: a property renamed from Size keeps the id
+    size, and "size" then means the property called Size, not that one.
     """
     if not isinstance(name_or_id, str):
         return None
     props = board.get("properties") or []
+    key = _name_key(name_or_id)
+    if names_first and key:
+        for prop in props:
+            if _name_key(prop["name"]) == key:
+                return prop
     for prop in props:
         if prop["id"] == name_or_id:
             return prop
-    key = _name_key(name_or_id)
     if not key:
         return None
     for field in ("name", "id"):

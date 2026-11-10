@@ -34,7 +34,7 @@ CARD_INPUT = ("title", "group", "column", "summary", "blocked", "fields", "secti
               "labels", "properties", "tasks")
 CARD_FIELDS = CARD_INPUT + ("archived",)
 BOARD_FIELDS = ("name", "description", "prefix", "groupLabel", "columns", "groups", "checklists", "template",
-                "labels", "properties", "views", "settings", "moveCards")
+                "labels", "properties", "views", "settings", "moveCards", "archived")
 SETTINGS_FIELDS = ("cardFace", "limitPolicy", "defaultView")
 TASK_FIELDS = ("text", "done")
 MIN_RANK_GAP = 1e-6
@@ -89,6 +89,20 @@ def restore_backup(path, name):
     except OSError as e:
         raise Unavailable(f"Can't restore over {path}: {storage.reason(e)}. Nothing was changed.") from e
     return {"boards": len(data["boards"]), "cards": sum(len(b["cards"]) for b in data["boards"]), "kept": kept}
+
+
+def describe_backups(path):
+    """Every backup of the file at `path`, newest first, and what each holds: [{name, path, modified, bytes, boards,
+    cards}]. `boards` and `cards` are None for a copy that can't be read. The backups command and the page list these."""
+    out = []
+    for item in storage.list_backups(resolve_path(path)):
+        try:
+            data, _ = schema.load_bytes(_read_bytes(item["path"]), item["name"])
+            held = {"boards": len(data["boards"]), "cards": sum(len(b["cards"]) for b in data["boards"])}
+        except (OSError, StoreError):
+            held = {"boards": None, "cards": None}
+        out.append({**item, **held})
+    return out
 
 
 def outline(board):
@@ -212,7 +226,7 @@ class Store:
             for b in self.data["boards"]:
                 archived = sum(1 for c in b["cards"] if c["archived"])
                 out.append({"id": b["id"], "name": b["name"], "rev": b["rev"],
-                            "cards": len(b["cards"]) - archived, "archived": archived})
+                            "cards": len(b["cards"]) - archived, "archived": archived, "archivedAt": b["archived"]})
             return out
 
     def get_board(self, board_id):
@@ -247,10 +261,10 @@ class Store:
         for col_name, limit in columns or DEFAULT_COLUMNS:
             cid = slug(col_name, taken)
             taken.add(cid)
-            cols.append({"id": cid, "name": col_name, "limit": limit})
+            cols.append({"id": cid, "name": col_name, "limit": limit, "done": False})
         stamp = now()
         return {"id": "b-" + secrets.token_hex(4), "name": name, "description": description, "prefix": prefix,
-                "groupLabel": group_label, "rev": 1, "created": stamp, "updated": stamp,
+                "groupLabel": group_label, "rev": 1, "created": stamp, "updated": stamp, "archived": None,
                 "columns": cols, "groups": [], "checklists": [], "template": [], "labels": [], "properties": [], "views": [],
                 "settings": default_settings(), "counters": {}, "cards": []}
 
@@ -290,6 +304,10 @@ class Store:
             raise StoreError("moveCards only goes with a new list of columns.")
 
         def apply(board):
+            if "archived" in changes:  # archiving keeps everything; it only puts the board out of the way
+                if not isinstance(changes["archived"], bool):
+                    raise StoreError("archived must be true or false.")
+                board["archived"] = (board["archived"] or now()) if changes["archived"] else None
             if "name" in changes:
                 board["name"] = text(changes["name"], "Board name", MAX_NAME, required=True)
             if "description" in changes:
@@ -322,6 +340,34 @@ class Store:
             return None
 
         return self._mutate(board_id, rev, apply)[0]
+
+    def move_board(self, board_id, position):
+        """Put a board at `position` (0 is the first) among the boards on its side: the boards in use, or the archived
+        ones. The order is the order of the boards in the file. It changes no board, so no revision goes up."""
+        if not isinstance(position, int) or isinstance(position, bool):
+            raise StoreError("position must be a whole number: 0 for the first place.")
+        with self._changing():
+            i, board = self._find(board_id)
+            rest = self.data["boards"][:i] + self.data["boards"][i + 1:]
+            side = [n for n, b in enumerate(rest) if bool(b["archived"]) == bool(board["archived"])]
+            position = max(0, min(position, len(side)))
+            if not side:
+                at = i
+            else:
+                at = side[position] if position < len(side) else side[-1] + 1
+            boards = rest[:at] + [board] + rest[at:]
+            if boards != self.data["boards"]:
+                self._save({**self.data, "boards": boards})
+
+    def restore(self, name):
+        """Make a listed backup the live file, exactly as `laneboard restore` does, keeping the file it replaces, and
+        read it. Works when the live file is broken. Answers {boards, cards, kept}, where kept is a file name or None."""
+        if not isinstance(name, str) or not name:
+            raise StoreError("Say which backup to restore, by its name as the list of backups shows it.")
+        with self._lock:
+            done = restore_backup(self.path, name)
+            self._refresh()
+        return {**done, "kept": os.path.basename(done["kept"]) if done["kept"] else None}
 
     def delete_board(self, board_id, rev=None):
         with self._changing():
@@ -825,12 +871,14 @@ class Store:
         return value
 
     def _columns(self, board, columns, keep_ids=False):
-        """Validate a new column list. Returns (columns, ids that no longer exist)."""
+        """Validate a new column list. Returns (columns, ids that no longer exist).
+
+        A column sent without `done` keeps the one it had, so a list sent before done columns existed loses none."""
         if not isinstance(columns, list) or not columns:
             raise StoreError("A board needs at least one column.")
         if len(columns) > MAX_COLUMNS:
             raise StoreError(f"A board can have at most {MAX_COLUMNS} columns.")
-        existing = {c["id"] for c in board["columns"]}
+        existing = {c["id"]: c for c in board["columns"]}
         usable = lambda cid: isinstance(cid, str) and (cid in existing or (keep_ids and ID_RE.fullmatch(cid)))  # noqa: E731
         taken = set()
         for col in columns:
@@ -853,9 +901,14 @@ class Store:
             if not usable(cid) or (cid not in existing and cid in taken):
                 cid = slug(name, taken)
             taken.add(cid)
-            out.append({"id": cid, "name": name, "limit": limit})
+            done = col.get("done")
+            if done is None:
+                done = existing.get(cid, {}).get("done", False)
+            elif not isinstance(done, bool):
+                raise StoreError(f"Whether {name} is a done column must be true or false.")
+            out.append({"id": cid, "name": name, "limit": limit, "done": done})
         kept = {c["id"] for c in out}
-        return out, existing - kept
+        return out, set(existing) - kept
 
     def _apply_columns(self, board, columns, move_cards):
         """Set the columns. Cards in a removed column go where moveCards says; otherwise it's refused."""

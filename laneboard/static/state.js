@@ -7,7 +7,8 @@ export const START_COMMAND = "python -m laneboard";
 const LAST_BOARD = "laneboard:last-board";
 
 export const state = {
-  boards: [],          // [{id, name, cards, archived, rev}]
+  boards: [],          // [{id, name, cards, archived, archivedAt, rev}]: every board, archived ones too, in order
+  overview: false,     // the boards overview (#/boards) is showing instead of a board
   board: null,         // the open board, as the server last sent it
   query: "",           // the search box, sent to the server as typed; the server reads the search language
   sort: "",            // the sort picker's sort string, like "-points"; empty is the board's own order
@@ -26,7 +27,7 @@ export const state = {
 
 // Lookup tables for the open board, rebuilt whenever it changes. Search text is filled in as needed.
 const emptyIndex = () => ({ byKey: new Map(), byColumn: new Map(), groups: new Map(), labels: new Map(), props: new Map(),
-  checkIds: new Set(), archived: [], text: new Map() });
+  checkIds: new Set(), done: new Set(), archived: [], text: new Map() });
 export let index = emptyIndex();
 
 // The last revision seen per board. A queued change must carry its own board's revision even if
@@ -51,6 +52,13 @@ export const byRank = (a, b) => a.rank - b.rank || a.key.localeCompare(b.key, un
 export const cardBy = (key) => index.byKey.get(key);
 export const cardsIn = (column) => index.byColumn.get(column) || [];
 export const activeCards = () => state.board.cards.filter((c) => !c.archived);
+// The columns whose cards count as done: the ones marked done, or the last column when none is. The server
+// decides the same way for search (is:done), the summary and the exports.
+export function doneColumns(columns) {
+  const marked = columns.filter((c) => c.done).map((c) => c.id);
+  return new Set(marked.length || !columns.length ? marked : [columns[columns.length - 1].id]);
+}
+export const isDone = (card) => index.done.has(card.column);
 export const groupOf = (card) => index.groups.get(card.group) || null;
 export const labelsOf = (ids) => ids.map((id) => index.labels.get(id)).filter(Boolean);
 
@@ -66,6 +74,7 @@ export function reindex() {
   index = emptyIndex();
   if (!b) return;
   for (const col of b.columns) index.byColumn.set(col.id, []);
+  index.done = doneColumns(b.columns);
   for (const g of b.groups) index.groups.set(g.id, g);
   for (const label of b.labels) index.labels.set(label.id, label);
   for (const prop of b.properties) index.props.set(prop.id, prop);

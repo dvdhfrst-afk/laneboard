@@ -111,6 +111,7 @@ def _check_columns(board, at):
         col.setdefault("limit", None)
         _require(col["limit"] is None or (_is_int(col["limit"]) and 1 <= col["limit"] <= MAX_COLUMN_LIMIT), at,
                  f"the limit of column {col['name']!r} must be a whole number from 1 to {MAX_COLUMN_LIMIT}, or null.")
+        _require(isinstance(col.get("done", False), bool), at, f"done on column {col['name']!r} must be true or false.")
     return names
 
 
@@ -335,7 +336,8 @@ def _structure(board):
     out = {
         "prefix": prefix,
         "groupLabel": board.get("groupLabel", "Group"),
-        "columns": [{"name": c["name"], "limit": c.get("limit")} for c in board["columns"]],
+        "columns": [dict({"name": c["name"], "limit": c.get("limit")}, **({"done": True} if c.get("done") else {}))
+                    for c in board["columns"]],
         "groups": [{"name": g["name"], "prefix": g.get("prefix", prefix), "color": g.get("color", "slate"),
                     "link": g.get("link", ""), "details": copy.deepcopy(g.get("details") or [])}
                    for g in board.get("groups") or []],

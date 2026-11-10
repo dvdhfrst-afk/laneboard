@@ -33,7 +33,7 @@ VERSION2 = json.loads(r"""
    "sections": [], "notes": "old", "checks": [], "archived": "2026-11-10T05:48:43Z", "created": "2026-11-10T05:48:43Z",
    "updated": "2026-11-10T05:48:43Z"}]}]}
 """)
-BOARD_ADDED = {"labels": [], "properties": [], "views": [], "settings": schema.default_settings()}
+BOARD_ADDED = {"labels": [], "properties": [], "views": [], "settings": schema.default_settings(), "archived": None}
 CARD_ADDED = {"labels": [], "properties": {}, "tasks": []}
 
 
@@ -65,7 +65,8 @@ class UpgradeFromVersion2(FileCase):
         board = Store(self.path).get_board("b-09ba90f6")
         want = self.old["boards"][0]
         self.assertEqual({k: v for k, v in board.items() if k != "cards"},
-                         {**{k: v for k, v in want.items() if k != "cards"}, **BOARD_ADDED})
+                         {**{k: v for k, v in want.items() if k != "cards"}, **BOARD_ADDED,
+                          "columns": [{**col, "done": False} for col in want["columns"]]})
         self.assertEqual(board["cards"], [{**card, **CARD_ADDED} for card in want["cards"]])
 
     def test_first_save_writes_format_3_and_keeps_the_original_byte_for_byte(self):

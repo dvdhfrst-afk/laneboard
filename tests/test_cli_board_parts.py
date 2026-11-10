@@ -310,13 +310,14 @@ class SettingsTest(Case):
     def test_showing_and_changing(self):
         self.assertEqual(self.lines("settings", "Work"), [
             "Name: Work", "Key prefix: T", "Limit policy: warn (a column over its limit is flagged)",
-            "Card face: group, labels, field, progress, blocked", "Default view: none"])
+            "Card face: group, labels, field, progress, blocked", "Default view: none",
+            "Done columns: Done (the last column, since none is marked)"])
         self.run_cli("properties", "Work", "--add", "Points", "--type", "number")
         out = self.lines("settings", "Work", "--name", "Office", "--description", "Line one", "--prefix", "OF",
                          "--limit-policy", "refuse", "--card-face", "labels, points ,blocked")
         self.assertEqual(out, ["Name: Office", "Description: Line one", "Key prefix: OF",
                                "Limit policy: refuse (a full column takes no more cards)", "Card face: labels, Points, blocked",
-                               "Default view: none"])
+                               "Default view: none", "Done columns: Done (the last column, since none is marked)"])
         board = self.board("Office")
         self.assertEqual(board["settings"]["cardFace"], ["labels", "points", "blocked"])
         self.assertTrue(board["properties"][0]["onCard"])
@@ -324,12 +325,92 @@ class SettingsTest(Case):
         self.run_cli("add", "Office", "Keyed")
         self.assertEqual(self.board("Office")["cards"][0]["key"], "OF-1")
 
+    def test_done_columns(self):
+        self.run_cli("add", "Work", "Write it", "--column", "Review")
+        self.run_cli("add", "Work", "Ship it", "--column", "Done")
+        self.assertIn("Done columns: Review, Done", self.lines("settings", "Work", "--done-columns", "review, Done"))
+        self.assertEqual([c["done"] for c in self.board("Work")["columns"]], [False, False, False, True, True])
+        self.assertEqual(self.lines("cards", "Work", "--query", "is:done"), self.lines("cards", "Work"))
+        self.assertIn("Work: 2 cards, 2 done", self.lines("stats", "Work"))
+        self.assertIn("Done columns: Done (the last column, since none is marked)",
+                      self.lines("settings", "Work", "--done-columns", ""))
+        self.assertEqual([c["done"] for c in self.board("Work")["columns"]], [False] * 5)
+        self.assertIn("Work: 2 cards, 1 done", self.lines("stats", "Work"))
+        self.unchanged("settings", "Work", "--done-columns", "Shipped", says="Work has no column called 'Shipped'")
+
     def test_refusals(self):
         self.unchanged("settings", "Work", "--limit-policy", "stop", code=2, says="invalid choice")
         self.unchanged("settings", "Work", "--card-face", "labels,colour", says="A card can't show \"colour\"")
         self.unchanged("settings", "Work", "--card-face", "labels,Labels", says='lists "Labels" twice')
         self.unchanged("settings", "Work", "--prefix", "a b", says="prefix")
         self.unchanged("settings", "Nope", says="There's no board called 'Nope'")
+
+
+class NamesWinTest(Case):
+    """What a person types is a name, and a name can be another item's id. The item with that name wins."""
+
+    def setUp(self):
+        super().setUp()
+        # Each pair: an item whose id came from its old name, and a newer one named like that id.
+        board = {"name": "Work", "columns": [{"id": "done", "name": "Shipped"}, {"name": "Done"}],
+                 "groups": [{"id": "web", "name": "Website", "prefix": "W"}, {"name": "web", "prefix": "WB"}],
+                 "labels": [{"name": "Front end"}, {"name": "front-end"}],
+                 "properties": [{"id": "size", "name": "Effort", "type": "number"}, {"name": "Size", "type": "number"},
+                                {"name": "Priority", "type": "choice", "choices": [{"id": "high", "name": "Urgent"}, "High"]}],
+                 "views": [{"id": "mine", "name": "Everything", "query": ""}, {"name": "mine", "query": "label:front-end"}],
+                 "cards": [{"title": "One", "column": "Shipped"}]}
+        store = Store(self.data, starter=False)
+        store.import_data(board)
+        made = self.board()
+        self.assertEqual([c["id"] for c in made["columns"]], ["done", "done-2"])
+        self.assertEqual([lab["id"] for lab in made["labels"]], ["front-end", "front-end-2"])
+        self.assertEqual([p["id"] for p in made["properties"]], ["size", "size-2", "priority"])
+
+    def test_cards_columns_groups_labels_and_properties_by_name(self):
+        self.run_cli("edit", "Work", "T-1", "--label", "front-end", "--set", "size=3", "--set", "priority=high",
+                     "--group", "web", "--column", "done")
+        card = self.card("T-1")
+        self.assertEqual((card["labels"], card["properties"], card["group"], card["column"]),
+                         (["front-end-2"], {"size-2": 3, "priority": "high-2"}, "web-2", "done-2"))
+        self.run_cli("edit", "Work", "T-1", "--unlabel", "front-end", "--label", "Front end", "--clear", "size")
+        self.assertEqual((self.card("T-1")["labels"], self.card("T-1")["properties"]), (["front-end"], {"priority": "high-2"}))
+        self.run_cli("move", "Work", "T-1", "shipped")
+        self.assertEqual(self.card("T-1")["column"], "done")
+        self.assertEqual(self.lines("add", "Work", "Two", "--column", "done", "--group", "web"), ["WB-1"])
+        self.assertEqual((self.card("WB-1")["column"], self.card("WB-1")["group"]), ("done-2", "web-2"))
+        self.assertEqual([line.split()[0] for line in self.lines("cards", "Work", "--column", "done")], ["WB-1"])
+        self.run_cli("edit", "Work", "T-1", "--set", "Effort=5")
+        self.assertEqual(self.card("T-1")["properties"]["size"], 5, "an id still works when no name is taken")
+
+    def test_board_structure_commands_by_name(self):
+        self.assertEqual(self.lines("labels", "Work", "--rename", "front-end=Web"), ["Renamed front-end to Web."])
+        self.assertEqual([lab["name"] for lab in self.board()["labels"]], ["Front end", "Web"])
+        self.assertEqual(self.lines("properties", "Work", "--remove", "size"), ["Removed Size."])
+        self.assertEqual([p["name"] for p in self.board()["properties"]], ["Effort", "Priority"])
+        self.run_cli("settings", "Work", "--card-face", "labels, effort", "--default", "mine")
+        settings = self.board()["settings"]
+        self.assertEqual(settings["cardFace"], ["labels", "size"])
+        self.assertEqual(settings["defaultView"], next(v["id"] for v in self.board()["views"] if v["name"] == "mine"))
+        self.run_cli("views", "Work", "--default", "mine")
+        self.assertNotEqual(self.board()["settings"]["defaultView"], "mine")
+        self.assertEqual(self.lines("views", "Work", "--remove", "mine"), ["Removed mine."])
+        self.assertEqual([v["name"] for v in self.board()["views"]], ["Everything"])
+        self.run_cli("labels", "Work", "--add", "front-end")
+        self.assertEqual([line.split()[0] for line in self.lines("cards", "Work", "--view", "Everything")], ["T-1"])
+
+    def test_boards_templates_and_transfer_by_name(self):
+        other = Store(self.data).create_board("Elsewhere")
+        Store(self.data).create_board(other["id"])  # a board named like another board's id
+        renamed = Store(self.data).update_board(other["id"], {"columns": [{"id": "backlog", "name": "Later"}, {"name": "backlog"}]})
+        self.assertEqual([c["id"] for c in renamed["columns"]], ["backlog", "backlog-2"])
+        out = self.lines("transfer", "Work", "T-1", "Elsewhere", "--column", "backlog")
+        self.assertEqual(out, ["Moved T-1 to Elsewhere as T-1, in backlog."])
+        self.assertEqual(self.lines("cards", other["id"]), ["No cards to show."], "the board with that name, not that id")
+        self.run_cli("templates", "save", "Work", "software")
+        out = self.lines("new", "Mine", "--template", "software")
+        self.assertIn("from the template software", out[0])
+        self.assertEqual(self.board("Mine")["columns"][0]["name"], "Shipped")
+        self.assertEqual(self.lines("templates", "delete", "software", "--yes"), ["Deleted the template software."])
 
 
 class FullColumnTest(Case):

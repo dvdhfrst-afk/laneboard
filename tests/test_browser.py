@@ -2298,5 +2298,297 @@ class TransferSizes(TransferCase):
         self.assertEqual(self.names(), ["Parts"], "looking adds nothing")
 
 
+class OverviewCase(BrowserCase):
+    def three_boards(self):
+        work = sample_board("Work", 3)
+        work["cards"][2]["column"] = "done"
+        return [sample_board("Home", 2), work, sample_board("Garden", 1)]
+
+    def board_id(self, name):
+        return next(b["id"] for b in self.app.load()["boards"] if b["name"] == name)
+
+    def names(self, page, part="#overview .ov-list"):
+        return page.eval_on_selector_all(f"{part} .ov-name", "els => els.map(e => e.textContent)")
+
+    def open_overview(self, page):
+        page.select_option("#board-pick", "/boards")
+        page.wait_for_selector("#overview .ov-board")
+
+    def press_in_row(self, page, board_id, action):
+        page.focus(f'#overview [data-board="{board_id}"] [data-action="{action}"]')
+        page.keyboard.press("Enter")
+
+    def focused_action(self, page):
+        return page.evaluate("[document.activeElement.closest('[data-board]')?.dataset.board, document.activeElement.dataset.action]")
+
+
+class BoardsOverview(OverviewCase):
+    def test_the_overview_lists_and_acts_on_every_board(self):
+        page = self.start(*self.three_boards())
+        self.open_overview(page)
+        self.assertEqual(page.evaluate("location.hash"), "#/boards")
+        self.assertEqual(page.locator("#board-name").inner_text(), "Boards")
+        self.assertTrue(page.locator("#board-wrap").is_hidden())
+        self.assertEqual(self.names(page), ["Home", "Work", "Garden"])
+        work = self.board_id("Work")
+        row = page.locator(f'#overview [data-board="{work}"]')
+        self.assertIn("3 cards: 1 done, 2 not done", row.inner_text())
+        self.assertIn("Backlog 2, Ready 0, In progress 0, Review 0, Done 1 (done)", row.locator(".col-bar").get_attribute("aria-label"))
+
+        self.press_in_row(page, work, "archive")  # by keyboard, and focus stays with the board
+        self.until(page, f"document.querySelector('[data-board=\"{work}\"]')?.classList.contains('archived')")
+        self.assertTrue(self.app.board(1)["archived"])
+        self.assertEqual(self.focused_action(page), [work, "restore"])
+        self.assertEqual(self.names(page, "#overview .ov-list:last-of-type"), ["Work"])
+        picker = page.eval_on_selector_all("#board-pick option", "els => els.map(e => e.textContent)")
+        self.assertFalse(any(o.startswith("Work") for o in picker), picker)
+
+        garden = self.board_id("Garden")
+        self.press_in_row(page, garden, "up")
+        self.until(page, "document.querySelector('#overview .ov-name').textContent === 'Garden'")
+        self.assertEqual([b["name"] for b in self.app.load()["boards"]], ["Garden", "Home", "Work"])
+        self.assertEqual(self.focused_action(page), [garden, "down"], "Move up is off at the top, so focus is on Move down")
+
+        home = self.board_id("Home")
+        self.press_in_row(page, home, "rename")
+        page.wait_for_selector(".ov-rename input")
+        self.assertEqual(page.evaluate("document.activeElement.value"), "Home")
+        page.keyboard.type("House")
+        page.keyboard.press("Enter")
+        self.until(page, f"document.querySelector('[data-board=\"{home}\"] .ov-name')?.textContent === 'House'")
+        self.assertEqual(self.app.board(1)["name"], "House")
+
+        self.press_in_row(page, garden, "duplicate")
+        self.until(page, "[...document.querySelectorAll('#overview .ov-name')].some((e) => e.textContent === 'Copy of Garden')")
+        copy = self.board_id("Copy of Garden")
+        self.assertEqual(len(self.app.load()["boards"]), 4)
+        self.press_in_row(page, copy, "delete")
+        page.wait_for_selector(f'[data-board="{copy}"] .confirm')
+        self.assertIn("A backup of the file is kept first", page.locator(f'[data-board="{copy}"] .confirm').inner_text())
+        page.click(f'[data-board="{copy}"] .confirm >> text=Delete board')
+        self.until(page, f"!document.querySelector('[data-board=\"{copy}\"]')")
+        self.assertEqual(len(self.app.load()["boards"]), 3)
+        self.assertTrue(any(n.endswith("-before-delete.json") for n in os.listdir(self.app.data + ".backups")))
+
+        self.press_in_row(page, work, "restore")
+        self.until(page, f"!document.querySelector('[data-board=\"{work}\"]').classList.contains('archived')")
+        self.assertIsNone(self.app.board(2)["archived"])
+        page.click(f'[data-board="{garden}"] .ov-name a')
+        self.until(page, "document.querySelector('#board-name').textContent === 'Garden'")
+        self.assertTrue(page.locator("#overview").is_hidden())
+        self.assertTrue(page.locator("#board .card").first.is_visible())
+
+    def test_an_archived_board_stays_whole_and_opens_by_its_address(self):
+        page = self.start(*self.three_boards())
+        work = self.board_id("Work")
+        page.select_option("#board-pick", work)
+        self.until(page, "document.querySelector('#board-name').textContent === 'Work'")
+        page.click("#menu summary")
+        page.click("#menu >> text=Archive this board")
+        page.wait_for_selector("#board-archived:not([hidden])")
+        self.assertIn("This board is archived", page.locator("#board-archived").inner_text())
+        self.assertEqual(len(self.app.board(1)["cards"]), 3)
+        self.assertEqual(page.locator("#board .card").count(), 3, "it stays open, with every card")
+        page.evaluate("location.hash = ''")
+        page.reload()
+        self.until(page, "document.querySelector('#board-name').textContent !== 'Laneboard'")
+        self.assertNotEqual(page.locator("#board-name").inner_text(), "Work", "an archived board isn't the one a page opens with")
+        page.evaluate(f"location.hash = '#{work}'")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Work'")
+        page.click("#board-archived >> text=Restore board")
+        self.until(page, "document.querySelector('#board-archived').hidden")
+        self.assertIsNone(self.app.board(1)["archived"])
+
+    def test_every_board_archived_opens_the_overview(self):
+        page = self.start(sample_board("Only", 1))
+        board = self.app.board()["id"]
+        self.app.api("PATCH", f"api/boards/{board}", {"archived": True})
+        page.goto(self.app.url)  # no board in the address
+        page.wait_for_selector("#overview .ov-board")
+        self.assertEqual(page.evaluate("location.hash"), "#/boards")
+        self.assertIn("Every board is archived", page.locator("#overview").inner_text())
+
+
+class DoneColumnsPage(OverviewCase):
+    def test_marking_a_done_column_changes_search_and_the_summary(self):
+        page = self.start(*self.three_boards())
+        work = self.board_id("Work")
+        page.select_option("#board-pick", work)
+        self.until(page, "document.querySelector('#board-name').textContent === 'Work'")
+        self.assertEqual(page.locator('[data-col="done"] .done-mark').count(), 1, "the last column counts when none is marked")
+        page.fill("#search", "is:done")
+        self.until(page, "[...document.querySelectorAll('#board .card')].map((e) => e.dataset.key).join() === 'T-3'")
+        page.fill("#search", "")
+        page.click("#board-settings")
+        page.locator('.col-row[data-id="backlog"] .c-done').check()
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        self.assertEqual([c["done"] for c in self.app.board(1)["columns"]], [True, False, False, False, False])
+        self.assertEqual(page.locator(".done-mark").count(), 1)
+        self.assertEqual(page.locator('[data-col="backlog"] .done-mark').count(), 1)
+        page.fill("#search", "is:done")
+        self.until(page, "[...document.querySelectorAll('#board .card')].map((e) => e.dataset.key).join() === 'T-1,T-2'")
+        summary = self.app.api("GET", f"api/boards/{work}/summary")["summary"]
+        self.assertEqual((summary["done"], summary["notDone"]), (2, 1))
+        page.click('#board .card[data-key="T-1"]')
+        page.wait_for_selector("#card-column")
+        self.assertEqual(page.evaluate("document.querySelector('#card-column').selectedOptions[0].textContent"), "Backlog (done)")
+        self.close_sheet(page)
+        self.open_overview(page)
+        self.assertIn("3 cards: 2 done, 1 not done", page.locator(f'[data-board="{work}"]').inner_text())
+
+    def close_sheet(self, page):
+        page.click("#sheet >> text=Close")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+
+class BackupsPage(BrowserCase):
+    def test_restoring_a_backup_from_the_more_menu(self):
+        page = self.start(sample_board("Work", 2))
+        board = self.app.board()["id"]
+        self.app.api("PATCH", f"api/boards/{board}", {"name": "Renamed"})
+        self.poll(page)
+        self.until(page, "document.querySelector('#board-name').textContent === 'Renamed'")
+        page.click("#menu summary")
+        page.click("#menu >> text=Backups")
+        page.wait_for_selector(".backup-row")
+        row = page.locator(".backup-row").first
+        self.assertIn("previous", row.inner_text())
+        self.assertIn("1 board, 2 cards", row.inner_text())
+        row.locator("text=Restore").click()
+        confirm = row.locator(".confirm")
+        self.assertIn("kept as a backup first", confirm.inner_text())
+        self.assertEqual(page.evaluate("document.activeElement.textContent"), "Keep what I have")
+        page.keyboard.press("Enter")
+        self.until(page, "!document.querySelector('.backup-row .confirm')")
+        self.assertEqual(self.app.board()["name"], "Renamed", "keeping what you have changes nothing")
+        row.locator("text=Restore").click()
+        confirm.locator("text=Restore it").click()
+        self.until(page, "document.querySelector('#board-name').textContent === 'Work'")
+        self.until(page, "!document.querySelector('#sheet').open")
+        self.assertEqual(self.app.board()["name"], "Work")
+        self.assertIn("Restored previous", self.toast(page))
+        self.assertTrue(any(n.endswith("-before-restore.json") for n in os.listdir(self.app.data + ".backups")))
+
+    def test_a_broken_file_offers_backups_in_the_banner(self):
+        page = self.start(sample_board("Work", 2))
+        board = self.app.board()["id"]
+        self.app.api("PATCH", f"api/boards/{board}", {"name": "Renamed"})
+        with open(self.app.data, "w", encoding="utf-8") as f:
+            f.write("{ not json")
+        self.poll(page)
+        page.wait_for_selector("#banner.bad button")
+        page.click("#banner >> text=Backups")
+        page.wait_for_selector(".backup-row")
+        page.locator(".backup-row").first.locator("text=Restore").click()
+        page.click(".backup-row .confirm >> text=Restore it")
+        self.until(page, "document.querySelector('#banner').hidden")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Work'")
+        self.assertEqual(self.app.board()["name"], "Work")
+
+
+class Palette(OverviewCase):
+    def open(self, page):
+        page.keyboard.press("Control+k")
+        page.wait_for_selector("dialog.palette[open]")
+        self.assertEqual(page.evaluate("document.activeElement.id"), "palette-input")
+
+    def chosen(self, page):
+        return page.evaluate("document.getElementById(document.querySelector('#palette-input').getAttribute('aria-activedescendant'))?.textContent")
+
+    def test_finding_and_running_things_by_keyboard(self):
+        page = self.start(*self.three_boards())
+        self.open(page)
+        self.assertEqual(page.get_attribute("#palette-input", "role"), "combobox")
+        self.assertEqual(page.get_attribute("#palette-input", "aria-controls"), "palette-list")
+        self.assertEqual(page.get_attribute("#palette-list", "role"), "listbox")
+        page.keyboard.type("T-2")
+        self.until(page, "document.querySelector('#palette-list [aria-selected=true]')?.textContent.includes('T-2')")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#sheet[open] #card-column")
+        self.assertTrue(page.locator("dialog.palette").count() == 0 or page.locator("dialog.palette").is_hidden())
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+        self.open(page)
+        page.keyboard.type("settings")
+        self.until(page, "document.querySelectorAll('#palette-list [role=option]').length > 0")
+        self.assertIn("Board settings", self.chosen(page))
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#sheet[open] .col-row")
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+        self.open(page)  # every item in More is there too
+        page.keyboard.type("templates")
+        self.until(page, "[...document.querySelectorAll('#palette-list [role=option]')].some((e) => e.textContent.includes('In More'))")
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('dialog.palette[open]')")
+
+        self.open(page)
+        page.keyboard.type("garden")
+        self.until(page, "document.querySelector('#palette-list [aria-selected=true]')?.textContent.includes('Garden')")
+        page.keyboard.press("Enter")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Garden'")
+
+        self.open(page)
+        page.keyboard.type("all boards")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#overview .ov-board")
+
+        page.focus("#board-pick")  # Ctrl+K works from anywhere, and Up and Down go round the list
+        self.open(page)
+        count = page.locator("#palette-list [role=option]").count()
+        page.keyboard.press("ArrowUp")
+        self.assertEqual(page.get_attribute("#palette-input", "aria-activedescendant"), f"palette-{count - 1}")
+        page.keyboard.press("ArrowDown")
+        self.assertEqual(page.get_attribute("#palette-input", "aria-activedescendant"), "palette-0")
+        page.keyboard.type("nothing like this at all")
+        self.until(page, "document.querySelector('.palette-none') !== null")
+        self.assertIsNone(page.get_attribute("#palette-input", "aria-activedescendant"))
+        page.keyboard.press("Enter")
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('dialog.palette[open]')")
+
+    def test_it_keeps_what_is_being_typed(self):
+        page = self.start(*self.three_boards())
+        page.keyboard.press("n")
+        page.wait_for_selector("#sheet[open] input")
+        page.keyboard.type("Half written")
+        self.open(page)
+        page.keyboard.type("garden")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#sheet .confirm")
+        self.assertIn("Discard your changes?", page.locator("#sheet .confirm").inner_text())
+        page.click("#sheet .confirm >> text=Keep editing")
+        self.assertNotEqual(page.locator("#board-name").inner_text(), "Garden")
+
+
+class OverviewSizes(OverviewCase):
+    def test_at_phone_and_desktop_widths(self):
+        page = self.start(*self.three_boards())
+        self.app.api("PATCH", f"api/boards/{self.board_id('Garden')}", {"archived": True})
+        for width, height in ((390, 844), (1440, 900)):
+            page.set_viewport_size({"width": width, "height": height})
+            self.open_overview(page)
+            page.wait_for_selector("#overview .ov-board.archived")
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0, f"overview at {width} px")
+            page.click("#menu summary")
+            page.click("#menu >> text=Backups")
+            page.wait_for_selector(".backup-row")
+            over = page.evaluate("document.querySelector('#sheet').scrollWidth - document.querySelector('#sheet').clientWidth")
+            self.assertLessEqual(over, 0, f"backups at {width} px")
+            page.click("#sheet >> text=Close")
+            self.until(page, "!document.querySelector('#sheet').open")
+            page.keyboard.press("Control+k")
+            page.wait_for_selector("dialog.palette[open]")
+            box = page.evaluate("(() => { const r = document.querySelector('dialog.palette').getBoundingClientRect(); return [r.left, r.right]; })()")
+            self.assertGreaterEqual(box[0], 0, f"palette at {width} px")
+            self.assertLessEqual(box[1], width, f"palette at {width} px")
+            page.keyboard.press("Escape")
+            page.select_option("#board-pick", self.board_id("Home"))
+            self.until(page, "document.querySelector('#board-name').textContent === 'Home'")
+
+
 if __name__ == "__main__":
     unittest.main()

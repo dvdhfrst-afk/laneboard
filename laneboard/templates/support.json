@@ -20,7 +20,8 @@
    },
    {
     "name": "Resolved",
-    "limit": null
+    "limit": null,
+    "done": true
    }
   ],
   "labels": [

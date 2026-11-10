@@ -71,6 +71,7 @@ class Summary(unittest.TestCase):
 
     def test_counts(self):
         self.assertEqual((self.s["cards"], self.s["archived"], self.s["blocked"]), (4, 1, 1))
+        self.assertEqual((self.s["done"], self.s["notDone"]), (1, 3))  # no column is marked, so the last one counts
         self.assertEqual(self.s["tasks"], {"done": 2, "total": 3})
         # Two lines can be ticked on each of the four cards on the board; headings and lost ids don't count.
         self.assertEqual(self.s["checks"], {"done": 3, "total": 8})
@@ -79,7 +80,8 @@ class Summary(unittest.TestCase):
         cols = {c["id"]: c for c in self.s["columns"]}
         self.assertEqual([c["id"] for c in self.s["columns"]], ["todo", "doing", "done"])
         self.assertEqual(cols["todo"], {"id": "todo", "name": "To do", "cards": 1, "limit": None, "over": False,
-                                        "sums": {"points": 2.5, "hours": 3}})
+                                        "done": False, "sums": {"points": 2.5, "hours": 3}})
+        self.assertTrue(cols["done"]["done"])
         self.assertEqual(cols["doing"]["cards"], 2)
         self.assertTrue(cols["doing"]["over"])  # two cards, limit one
         self.assertEqual(cols["doing"]["sums"], {"points": 0.3, "hours": 5})  # 0.1 + 0.2 shown as 0.3
@@ -144,7 +146,8 @@ class OldBoards(unittest.TestCase):
         self.assertEqual((s["cards"], s["archived"], s["blocked"]), (1, 1, 0))
         self.assertEqual((s["labels"], s["properties"], s["tasks"], s["checks"]), ([], [], {"done": 0, "total": 0},
                                                                                   {"done": 0, "total": 0}))
-        self.assertEqual(s["columns"], [{"id": "a", "name": "A", "cards": 1, "limit": None, "over": False, "sums": {}}])
+        self.assertEqual(s["columns"], [{"id": "a", "name": "A", "cards": 1, "limit": None, "over": False, "done": True,
+                                         "sums": {}}])
 
     def test_a_board_from_the_store(self):
         with tempfile.TemporaryDirectory() as tmp:

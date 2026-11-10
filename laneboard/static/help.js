@@ -2,8 +2,10 @@
 
 import { APP_VERSION, state } from "./state.js";
 import { h, sheetHead, showSheet } from "./dom.js";
+import { openBackups } from "./backups.js";
 
 const KEYS = [
+  ["Ctrl + K or Cmd + K", "Command palette: find any action, a board or a card, and run or open it"],
   ["n", "New card"], ["/", "Search"], ["s", "Sort"], ["v", "Saved views"], ["?", "This page"],
   ["Arrow keys", "Go from card to card"], ["Enter", "Open the card"],
   ["Shift + Up or Down", "Move the card within its column (in manual order)"], ["Shift + Left or Right", "Move the card to the next column"],
@@ -32,7 +34,7 @@ const SEARCH = [
   ["(bug OR crash) column:review", "Parentheses group words"],
   ["column:review, group:web, label:bug", "Cards in that column, group or label, by name or the start of it"],
   ["key:WEB-3, title:login, notes:token", "Words in just that part of a card"],
-  ["is:blocked, is:archived, is:over-limit, is:done", "Blocked, archived, in a column over its limit, in the last column"],
+  ["is:blocked, is:archived, is:over-limit, is:done", "Blocked, archived, in a column over its limit, in a done column (ticked Done in Board settings, or else the last column)"],
   ["has:notes, has:labels, has:tasks, has:points", "Cards with something there"],
   ["tasks:open, tasks:done, progress:>=50", "Tasks left to do, every task done, at least half ticked off"],
   ["points:>=3, points:2..5, priority:high", "A property compared with a value, or between two"],
@@ -62,6 +64,7 @@ export function openHelp() {
       h("p", { text: "Everything is in one file on this computer. Nothing is sent anywhere." }),
       info.data && h("p", {}, "Boards file: ", h("code", { text: info.data })),
       info.backups && h("p", {}, "Daily backups: ", h("code", { text: info.backups })),
-      h("p", { text: "To go back to an earlier copy, run the backups command, then the restore command." })),
+      h("p", {}, "To go back to an earlier copy, open ", h("button", { type: "button", class: "link", text: "Backups", onclick: openBackups }),
+        ", or run the backups command, then the restore command.")),
     h("p", { class: "hint", text: `Laneboard ${info.version || APP_VERSION}` })));
 }

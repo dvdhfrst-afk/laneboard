@@ -792,7 +792,10 @@ class TextExport(unittest.TestCase):
                       card("T-4", "Old errand", "c", archived="2026-01-01T00:00:00Z")]}
         self.assertEqual(plaintext.export(board).decode("utf-8"), "\n".join([
             "Errands", "This week", "", "To do (2)", "T-10  Buy stamps", "T-1   Post the parcel [Home, Car]", "",
-            "Doing (2/1, over the limit)", "T-2   Wash the car", "T-3   Fix the gate", "", "Done (0/3)", ""]))
+            "Doing (2/1, over the limit)", "T-2   Wash the car", "T-3   Fix the gate", "", "Done (0/3, done)", ""]))
+        board["columns"][1]["done"] = True  # a marked column is the only done one
+        self.assertIn("\nDoing (2/1, over the limit, done)\n", plaintext.export(board).decode("utf-8"))
+        self.assertIn("\nDone (0/3)\n", plaintext.export(board).decode("utf-8"))
 
     def test_the_sample_board(self):
         out = plaintext.export(sample_board()).decode("utf-8")
@@ -831,7 +834,7 @@ class TrelloImport(unittest.TestCase):
             ("Look at second hand ovens", "Ideas", True), ("Book the electrician", "To do", False),
             ("Measure the wall for the new shelves", "To do", False), ("Order the worktop", "Doing", False),
             ("Take the old cupboards to the tip", "Done", False), ("Paint the ceiling", "Done", False),
-            ("Move the sink to the window", "Ideas", True)])
+            ("Move the sink to the window", "Done", True)])
         worktop = self.card("Order the worktop")
         self.assertEqual(worktop["labels"], ["Urgent", "Shopping"])
         self.assertEqual(worktop["properties"], {"supplier": "Example Timber Yard", "cost": 420.5, "ordered": True})
@@ -850,7 +853,7 @@ class TrelloImport(unittest.TestCase):
 
     def test_warnings(self):
         self.assertEqual(self.result.warnings, [
-            "Skipped 1 archived list (Old plans). The 1 card in it came in as an archived card in Ideas.",
+            "Skipped 1 archived list (Old plans). The 1 card in it came in as an archived card in Done.",
             "Left out 1 custom field (Delivery) because Laneboard has no property of that kind.",
             "Took the commas out of 1 choice name, since a choice can't have one in its name.",
             "Left out the due dates on 1 card.",
@@ -924,6 +927,7 @@ class GithubImport(unittest.TestCase):
         b = self.board
         self.assertEqual(b["name"], "example-org/example-repo")
         self.assertEqual([c["name"] for c in b["columns"]], ["Backlog", "Ready", "In progress", "Review", "Done"])
+        self.assertEqual([c.get("done", False) for c in b["columns"]], [False, False, False, False, True])
         self.assertEqual([(lab["name"], lab["color"]) for lab in b["labels"]], [
             ("bug", "rose"), ("enhancement", "teal"), ("documentation", "blue"), ("good first issue", "violet"),
             ("help wanted", "teal"), ("wontfix", "slate")])

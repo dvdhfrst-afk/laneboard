@@ -11,7 +11,7 @@ import html
 import re
 
 from .. import stats
-from ..schema import COLORS, LINK_RE
+from ..schema import COLORS, LINK_RE, done_columns
 from .common import Format, Lookups, archived_cards, columns_with_cards
 
 _LINK = re.compile(r"(https?://[^\s<>\"'`)\]]+)")
@@ -128,7 +128,8 @@ def _tag(text, color, extra=""):
 def _summary(board, summary):
     numbers = [p for p in board.get("properties") or [] if p.get("type") == "number"]
     out = ['<section class="summary" aria-labelledby="summary">', '<h2 id="summary">Summary</h2>', '<dl class="totals">']
-    totals = [("Cards", summary["cards"]), ("Blocked", summary["blocked"]), ("Archived", summary["archived"])]
+    totals = [("Cards", summary["cards"]), ("Done", summary["done"]), ("Not done", summary["notDone"]),
+              ("Blocked", summary["blocked"]), ("Archived", summary["archived"])]
     for name, key in (("Tasks done", "tasks"), ("Checklist ticks", "checks")):
         if summary[key]["total"]:
             totals.append((name, f"{summary[key]['done']} of {summary[key]['total']}"))
@@ -139,8 +140,9 @@ def _summary(board, summary):
             f'<th class="n" scope="col">Limit</th>{head}</tr></thead>', "<tbody>"]
     for col in summary["columns"]:
         flag = ' <span class="over">over</span>' if col["over"] else ""
+        done = ' <span class="muted">(done)</span>' if col["done"] else ""
         sums = "".join(f'<td class="n">{_e(stats.number_text(col["sums"][p["id"]], p))}</td>' for p in numbers)
-        out.append(f'<tr><th scope="row">{_e(col["name"])}</th><td class="n">{col["cards"]}{flag}</td>'
+        out.append(f'<tr><th scope="row">{_e(col["name"])}{done}</th><td class="n">{col["cards"]}{flag}</td>'
                    f'<td class="n">{_e(col["limit"] or "")}</td>{sums}</tr>')
     out.append("</tbody></table></div>")
 
@@ -218,11 +220,13 @@ def export(board):
     out.append("</header>")
     out += _summary(board, summary)
     out.append('<main class="columns">')
+    done = done_columns(board)
     for col, cards in columns_with_cards(board):
         count = f"{len(cards)} / {col['limit']}" if col.get("limit") else str(len(cards))
         shown = "over" if col.get("limit") and len(cards) > col["limit"] else "count"
+        mark = ' <span class="muted">done</span>' if col["id"] in done else ""
         out.append(f'<section aria-label="{_e(col["name"])}"><h2>{_e(col["name"])} <span class="{shown}">'
-                   f"{_e(count)}</span></h2>")
+                   f"{_e(count)}</span>{mark}</h2>")
         for card in cards:
             out += _card(look, card, checklists)
         if not cards:

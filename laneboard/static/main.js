@@ -2,7 +2,7 @@
 // board. Every other module is imported from here; nothing imports this one.
 
 import { APP_VERSION, cardBy, drafts, setBoard, sheet, state } from "./state.js";
-import { $, announce, bindSheet, closeSheet, toast } from "./dom.js";
+import { $, announce, bindSheet, closeSheet, setBannerAction, toast } from "./dom.js";
 import { api, checkVersion, loadBoards, pending } from "./api.js";
 import { renderPicker, showBoard } from "./board.js";
 import { bindMenu, closeMenu, openMenu, renderMenu } from "./menu.js";
@@ -15,6 +15,9 @@ import { openNewBoard, openSettings } from "./settings.js";
 import { bindImport } from "./transfer.js";
 import { openHelp } from "./help.js";
 import { route } from "./nav.js";
+import { showOverview } from "./boards.js";
+import { openBackups } from "./backups.js";
+import { openPalette } from "./palette.js";
 
 const POLL_EVERY = 5000;
 
@@ -26,6 +29,11 @@ async function refresh() {
   try {
     const hadBoards = state.boards.length || state.board;
     await loadBoards();
+    if (state.overview) {
+      renderPicker();
+      await showOverview({ quiet: true });
+      return;
+    }
     if (!state.board) {
       if (state.boards.length || !hadBoards) await route();
       return;
@@ -83,6 +91,12 @@ function focusNeighbour(el, key) {
 function bindKeyboard() {
   const search = $("#search");
   document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {  // anywhere, even in a box
+      e.preventDefault();
+      closeMenu();
+      openPalette();
+      return;
+    }
     const menu = openMenu();
     if (e.key === "Escape" && menu) {
       closeMenu();
@@ -160,6 +174,7 @@ async function start() {
   bindSheet();
   bindDrag();
   $("#version").textContent = `Laneboard ${APP_VERSION}`;
+  setBannerAction({ label: "Backups", run: openBackups });
   checkVersion();
   renderMenu();
   try {

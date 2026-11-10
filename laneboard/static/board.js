@@ -1,8 +1,9 @@
 // Drawing the open board: the header, the columns and the cards on them, the groups table, and what an empty page offers.
 
-import { activeCards, cardsIn, filterParams, groupOf, index, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
+import { activeCards, cardsIn, filterParams, groupOf, index, isDone, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
 import { countBy, plural } from "./util.js";
 import { $, groupLink, groupTag, h, rich } from "./dom.js";
+import { OVERVIEW, archiveOpenBoard } from "./boards.js";
 import { renderMenu } from "./menu.js";
 import { drawPlan, matchCount, renderTools, searchSoon } from "./search.js";
 import { openCard, progress } from "./card.js";
@@ -25,16 +26,25 @@ export function showBoard(board) {
 export function render() {
   const b = state.board;
   reindex();
-  document.title = b ? `${b.name} - Laneboard` : "Laneboard";
-  $("#board-name").textContent = b ? b.name : "Laneboard";
+  const overview = state.overview;
+  document.title = overview ? "Boards - Laneboard" : b ? `${b.name} - Laneboard` : "Laneboard";
+  $("#board-name").textContent = overview ? "Boards" : b ? b.name : "Laneboard";
   renderPicker();
   renderMenu();
   const desc = $("#board-desc");
   desc.textContent = b?.description || "";
   desc.hidden = !b?.description;
+  renderArchivedNote();
   $("#new-card").disabled = !b;
   $("#board-settings").disabled = !b;
   $("#tools").hidden = !b;
+  $("#overview").hidden = !overview;
+  $("#board-wrap").hidden = overview;
+  if (overview) {
+    $("#groups").hidden = true;
+    $("#welcome").hidden = true;
+    return;
+  }
   renderSummary();
   if (!b) {
     $("#groups").hidden = true;
@@ -49,16 +59,34 @@ export function render() {
   searchSoon();
 }
 
+// The board picker lists the boards in use, in order, and ends with the boards overview, where archived boards are.
 export function renderPicker() {
   const pick = $("#board-pick");
-  const others = state.boards.filter((b) => b.id !== state.board?.id);
-  const signature = JSON.stringify(others.map((b) => [b.id, b.name, b.cards]));
+  const others = state.boards.filter((b) => b.id !== state.board?.id && !b.archivedAt);
+  const signature = JSON.stringify([state.overview, state.boards.length, others.map((b) => [b.id, b.name, b.cards])]);
   if (pick.dataset.signature === signature) return;  // redrawing would close the list if it's open
   pick.dataset.signature = signature;
-  pick.hidden = !others.length;
+  pick.hidden = !state.boards.length;
   pick.replaceChildren(h("option", { value: "", text: "Switch board" }),
-    ...others.map((b) => h("option", { value: b.id, text: `${b.name} (${plural(b.cards, "card")})` })));
+    ...others.map((b) => h("option", { value: b.id, text: `${b.name} (${plural(b.cards, "card")})` })),
+    !state.overview && h("option", { value: OVERVIEW, text: "All boards…" }));
   pick.value = "";
+}
+
+// An archived board says so at its top, with the way back.
+function renderArchivedNote() {
+  const note = $("#board-archived");
+  const b = state.overview ? null : state.board;
+  note.hidden = !b?.archived;
+  if (!b?.archived || note.dataset.board === `${b.id}:${b.archived}`) return;
+  note.dataset.board = `${b.id}:${b.archived}`;
+  const restore = h("button", { type: "button", text: "Restore board", onclick: async () => {
+    restore.disabled = true;
+    await archiveOpenBoard(false);
+    restore.disabled = false;
+  } });
+  note.replaceChildren(h("span", { text: "This board is archived. It keeps everything, and stays out of the board picker and Search every board." }),
+    restore, h("a", { href: `#${OVERVIEW}`, text: "All boards" }));
 }
 
 function renderEmpty() {
@@ -132,6 +160,8 @@ export function renderColumns() {
           "aria-label": `${closed ? "Show" : "Hide"} the cards in ${col.name}`, text: closed ? "▸" : "▾", onclick: () => toggleCollapsed(col.id) }),
         h("h2", { text: col.name }),
         h("div", { class: "right" },
+          index.done.has(col.id) && h("span", { class: "done-mark", role: "img", "aria-label": "Done column",
+            title: "A done column: its cards count as done", text: "✓" }),
           h("span", { class: over ? "count over" : full ? "count full" : "count",
             title: col.limit ? (full ? `Full: limit ${col.limit}, and this board takes no more cards` : `Limit ${col.limit}`) : null,
             text: narrowed ? `${shown.length} of ${all.length}` : col.limit ? `${all.length} / ${col.limit}` : String(all.length) }),
@@ -186,7 +216,9 @@ function faceParts() {
     progress: (card) => {
       const p = progress(card);
       const what = p.ticks && p.tasks ? "Checklist lines ticked and tasks done" : p.tasks ? "Tasks done" : "Checklist lines ticked";
-      return p.total > 0 && h("span", { class: `ticks${p.done === p.total ? " all" : ""}`, title: what, text: `${p.done}/${p.total}` });
+      const done = isDone(card);
+      return p.total > 0 && h("span", { class: `ticks${p.done === p.total ? " all" : ""}`,
+        title: done ? `${what}. The card is in a done column.` : what, text: `${done ? "✓ " : ""}${p.done}/${p.total}` });
     },
     blocked: (card) => card.blocked && h("span", { class: "flag", text: "Blocked" }),
   };

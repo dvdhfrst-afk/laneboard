@@ -162,6 +162,16 @@ def slug(name, taken):
     return made
 
 
+def done_columns(board):
+    """The ids of the columns whose cards count as done: the columns marked done, or the last column when none is.
+
+    This one rule decides for search (is:done), the summary, the exports, the command line and the page.
+    """
+    columns = board.get("columns") or []
+    marked = {c.get("id") for c in columns if c.get("done")}
+    return marked if marked or not columns else {columns[-1].get("id")}
+
+
 def tickable_ids(board):
     """Ids of the checklist lines a card can tick (headings can't be ticked)."""
     return {item.get("id") for cl in board.get("checklists") or [] for item in cl.get("items") or [] if not item.get("heading")}
@@ -286,6 +296,8 @@ def _check_columns(board, where):
         seen.add(col["id"])
         col.setdefault("limit", None)
         _require(col["limit"] is None or _is_int(col["limit"]), where, f"the limit of column {col['name']!r} must be a whole number or null.")
+        col.setdefault("done", False)
+        _require(isinstance(col["done"], bool), where, f"done must be true or false on column {col['name']!r}.")
     return seen
 
 
@@ -436,6 +448,8 @@ def check_board(board, index, known_ids, where):
     board.setdefault("created", now())
     board.setdefault("updated", board["created"])
     _require(_is_str(board["created"]) and _is_str(board["updated"]), at, "created and updated must be dates.")
+    board.setdefault("archived", None)
+    _require(board["archived"] is None or _is_str(board["archived"]), at, "archived must be a date or null.")
     column_ids = _check_columns(board, at)
     group_ids = _check_groups(board, at)
     _check_checklists(board, at)
