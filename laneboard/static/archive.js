@@ -15,11 +15,21 @@ export function openArchive() {
   const draw = () => {
     const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
     const found = index.archived.filter((c) => matchesQuery(c, words));
-    const row = (card) => h("div", { class: "archive-row" },
-      h("div", { class: "archive-text" },
-        h("a", { href: `#${state.board.id}/${card.key}`, text: `${card.key}  ${card.title}`, onclick: (e) => { e.preventDefault(); openCard(card.key); } }),
-        h("span", { class: "hint", text: `Archived ${when(card.archived)}` })),
-      h("button", { type: "button", text: "Restore", onclick: async () => { await setArchived(card.key, false); draw(); } }));
+    const row = (card) => {
+      const said = h("span", { class: "form-error", role: "alert" });
+      return h("div", { class: "archive-row" },
+        h("div", { class: "archive-text" },
+          h("a", { href: `#${state.board.id}/${card.key}`, text: `${card.key}  ${card.title}`, onclick: (e) => { e.preventDefault(); openCard(card.key); } }),
+          h("span", { class: "hint", text: `Archived ${when(card.archived)}` }),
+          said),
+        h("button", {
+          type: "button", text: "Restore",
+          onclick: async () => {
+            said.textContent = "";
+            if (await setArchived(card.key, false, (e) => { said.textContent = e.message; })) draw();
+          },
+        }));
+    };
     list.replaceChildren(
       ...(found.length ? found.slice(0, limit).map(row)
         : [h("p", { class: "hint", text: index.archived.length ? "No archived cards match." : "Nothing is archived. The Archive button on a card puts it here." })]),

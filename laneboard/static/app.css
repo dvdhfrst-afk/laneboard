@@ -238,4 +238,94 @@ kbd { font-family: var(--mono); font-size: 0.85em; background: var(--sunk); bord
 .start p { margin: 0; }
 .start .start-actions { justify-content: center; }
 
+/* labels and choices: a tinted chip with the name in it */
+.chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 0 7px; border-radius: 5px; font-size: 0.78rem; line-height: 1.55;
+  color: var(--fg); background: color-mix(in oklch, var(--g, var(--g-slate)) 15%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--g, var(--g-slate)) 45%, var(--surface)); overflow-wrap: anywhere; }
+.chip.none { --g: var(--g-slate); color: var(--muted); }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 3px; min-width: 0; max-width: 100%; }
+.filters .label-filter .chip { border: 0; background: none; padding: 0; }
+.label-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.picker { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-width: 0; }
+.picker-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 240px; overflow-y: auto; padding: 2px; min-width: 0; }
+.pick { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 6px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); cursor: pointer; max-width: 100%; min-width: 0; }
+.pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.pick input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.pick-new { border-style: dashed; border-radius: 999px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+
+/* the card on the board */
+.card .pf { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.card .pf-name { color: var(--muted); }
+.card .pf-text, .card .pf-link { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22ch; }
+.stars { color: var(--g-amber); letter-spacing: 1px; white-space: nowrap; }
+.count.full { color: var(--warn); }
+.col-note { font-size: 0.82rem; padding: 6px 8px; border-radius: 7px; background: var(--warn-soft); color: var(--fg); overflow-wrap: anywhere; }
+
+/* properties in the card view and form */
+.prop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.prop-row { display: grid; gap: 4px; align-content: start; min-width: 0; margin: 0; border: 0; padding: 7px 10px; border-radius: 8px; background: var(--sunk); }
+.prop-row legend { float: left; padding: 0; }
+.prop-row legend + * { clear: both; }
+.prop-row > input[type="checkbox"] { width: 18px; height: 18px; margin: 4px 0; accent-color: var(--accent); }
+.prop-msg { font-size: 0.8rem; color: var(--muted); min-height: 1.2em; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.num { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.num .unit { color: var(--muted); flex: none; }
+.url-edit { display: grid; gap: 3px; min-width: 0; }
+.open-link { font-size: 0.85rem; overflow-wrap: anywhere; }
+.opts { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.opt { display: inline-flex; position: relative; cursor: pointer; max-width: 100%; }
+.pick-input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+.opt .chip { padding: 2px 9px; opacity: 0.7; }
+.opt:has(input:checked) .chip { opacity: 1; outline: 2px solid var(--g, var(--accent)); outline-offset: 0; font-weight: 600; }
+.opt:has(input:focus-visible) .chip, .star:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stars-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.star { position: relative; cursor: pointer; font-size: 1.35rem; line-height: 1; color: var(--line); padding: 0 1px; border-radius: 4px; }
+.star.on { color: var(--g-amber); }
+.rating-text { margin-left: 6px; font-size: 0.82rem; color: var(--muted); }
+
+/* tasks */
+.task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.task { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 2px 0; }
+.task > input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.task-text { border-color: transparent; background: none; padding: 3px 6px; }
+.task-text:hover { border-color: var(--line); }
+.task-text:focus { border-color: var(--accent); background: var(--surface); }
+.task.done .task-text { color: var(--muted); text-decoration: line-through; }
+.task .mini button { padding: 1px 7px; }
+.task-note { grid-column: 2 / -1; font-size: 0.8rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.task-note:empty { display: none; }
+.task-add { display: flex; gap: 6px; }
+.task-add button { flex: none; }
+.tasks h3 .count { text-transform: none; letter-spacing: 0; font-weight: 500; margin-left: 4px; }
+
+/* moving a card to another board */
+.move-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.move-panel h3 { font-size: 0.95rem; font-weight: 620; }
+
+/* board settings tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; background: none; color: var(--muted); padding: 6px 12px; margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { color: var(--fg); background: var(--surface); border-color: var(--line); font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent); }
+.policy { display: grid; gap: 4px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.policy label, .face-pick { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.policy input, .face-pick input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--accent); }
+.label-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(0, 1fr) auto; align-items: end;
+  padding: 10px; background: var(--sunk); border-radius: 8px; }
+.l-preview { align-self: center; min-width: 0; padding-top: 14px; }
+.prop-def-top { display: grid; gap: 8px; grid-template-columns: minmax(0, 2fr) minmax(120px, 1fr) auto; align-items: end; }
+.p-options:empty { display: none; }
+.num-options { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.choice-row { display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr) minmax(80px, auto) auto; align-items: center; }
+.choice-row select { width: auto; max-width: 110px; }
+.face-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--sunk); border-radius: 8px; min-width: 0; }
+.face-pick { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  .label-row, .prop-def-top { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .prop-def-top .mini { grid-column: 1 / -1; }
+  .label-row .mini { justify-self: end; }
+  .l-preview { padding-top: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } .card:hover { transform: none; } }

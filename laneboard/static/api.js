@@ -66,7 +66,9 @@ function enqueue(task) {
 // is open by then), so a retry is worked out from what the server has now.
 // On a stale revision the board is reloaded; `retry` (true, or a function of the fresh board
 // saying whether it's safe) then re-sends the change, otherwise the caller gets the error.
-export function send(method, path, body, { retry = false } = {}) {
+// `other` is the id of a second board the change also needs the revision of (moving a card there):
+// its revision is picked up again on a retry, and kept from the answer's `target`.
+export function send(method, path, body, { retry = false, other = null } = {}) {
   const id = state.board.id;
   return enqueue(async () => {
     const open = () => state.board?.id === id;
@@ -78,6 +80,7 @@ export function send(method, path, body, { retry = false } = {}) {
       if (e.status !== 412) throw e;
       const fresh = (await api("GET", `/api/boards/${id}`)).board;
       revs.set(id, fresh.rev);
+      if (other) revs.set(other, (await api("GET", `/api/boards/${encodeURIComponent(other)}`)).board.rev);
       if (open()) showBoard(fresh);
       if (retry === true || (retry && retry(fresh))) {
         data = await attempt();
@@ -87,6 +90,7 @@ export function send(method, path, body, { retry = false } = {}) {
           + "The board has been reloaded. Save again to keep your version, or cancel to keep the other one."), { status: 412 });
       }
     }
+    if (other && data.target) revs.set(other, data.target.rev);
     if (data.board) {
       revs.set(id, data.board.rev);
       if (open()) {
