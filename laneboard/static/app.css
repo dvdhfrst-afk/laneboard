@@ -166,6 +166,7 @@ textarea { resize: vertical; line-height: 1.45; }
 @media (max-width: 640px) { .board { grid-template-columns: minmax(0, 1fr) !important; min-width: 0; } }
 .count { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .count.over { color: var(--warn); font-weight: 650; }
+.done-mark { font-size: 0.8rem; color: var(--g-green); }
 .col-head button { font-size: 0.8rem; padding: 0 7px; border-color: transparent; background: none; color: var(--muted); }
 .col.collapsed { min-height: 0; }
 .col-head button:hover { color: var(--accent); }
@@ -254,7 +255,8 @@ kbd { font-family: var(--mono); font-size: 0.85em; background: var(--sunk); bord
 .list-rows { display: grid; gap: 8px; }
 .list-row { display: grid; gap: 8px; padding: 10px; background: var(--sunk); border-radius: 8px; }
 .list-row .line { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
-.col-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 90px auto; align-items: end; }
+.col-row { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 90px auto auto; align-items: end; }
+.col-row .c-done-line { min-height: 36px; }
 .col-row.removed .field { opacity: 0.5; }
 .removing { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; background: var(--warn-soft); }
 .removing select { width: auto; max-width: 100%; }

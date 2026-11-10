@@ -109,6 +109,10 @@ time to see the keyboard shortcuts and where your data is.
   ticks.
 - **Card face** in Board settings picks what each card shows under its title on the board, and in
   what order: its group, labels, first field, progress, blocked note, and any property.
+- **Done columns**: tick **Done** on a column in Board settings and its cards count as done: `is:done`
+  finds them, the summary counts them as done, the column heading shows a check mark, and exports say
+  so. Several columns can be done. With none ticked, the last column counts, so a board works the
+  same as before until you tick one.
 - A column's **limit** flags the column when it holds more cards than that. Under **When a column
   is at its limit** in Board settings you can make a full column refuse cards instead; the board
   then says so where you tried to add or move one, and keeps what you typed.
@@ -186,7 +190,7 @@ accents don't matter. Archived cards are left out unless you ask for them with `
 | `(bug OR crash) column:review` | Parentheses group words; this finds either word in the Review column |
 | `column:review` or `col:review`, `group:web`, `label:bug` | Cards in that column, group or label, by its name or the start of it |
 | `key:WEB-3`, `title:login`, `notes:token` | Words in just that part of a card |
-| `is:blocked`, `is:archived`, `is:over-limit`, `is:done` | Blocked cards, archived cards, cards in a column over its limit, cards in the last column |
+| `is:blocked`, `is:archived`, `is:over-limit`, `is:done` | Blocked cards, archived cards, cards in a column over its limit, cards in a done column (the columns ticked Done, or the last column when none is) |
 | `has:notes`, `has:summary`, `has:labels`, `has:tasks`, `has:points` | Cards with something there, or with a value for that property |
 | `tasks:open`, `tasks:done`, `progress:>=50` | Cards with tasks left to do, with every task done, or at least half ticked off |
 | `points:3`, `points:>=3`, `points:2..5` | A number or rating property compared with a value, or between two |
@@ -225,8 +229,8 @@ It adds everything or nothing, never changes a board you have, and says what it 
 | Markdown | `markdown` | yes | yes | A document to read, with every column and card, and a block of board settings at the end. It imports back as the same board: columns, groups, labels, properties, saved views, settings, checklists, and each card's key, column, labels, values, summary, fields, sections, tasks, ticks and notes. A plain Markdown task list imports too: headings become columns, list items cards, and ticked items go to the last column | The times cards were created and last changed; the board copy gets new ones |
 | Web page | `html` | yes | no | A page to read or print: the board's numbers, every column and card, archived cards and groups. It runs no script and loads nothing | Saved views and settings. Archived cards show only their key, title and column |
 | Plain text | `text` | yes | no | Each column with its count, then one line per card with its key, title and labels, for pasting into a message | Everything else on a card, and archived cards |
-| Trello | `trello` | no | yes | From Trello's Export as JSON: open lists as columns, cards with their name, description (as notes), labels (in the nearest color), checklists (as tasks) and archived state, and custom fields of the text, number, checkbox and list kinds | Archived lists (their cards come in archived), due dates, members, attachments, votes, stickers, comments, and other kinds of custom field. Trello due dates are not imported |
-| GitHub issues | `github` | no | yes | The JSON from `gh issue list --json number,title,body,labels,state,url,milestone,assignees`: open issues in the first column and closed ones in the last, the issue number as the key (`GH-12`), labels, the body as notes, the address as a Link field, and the milestone and assignees as properties | Anything else the issue has |
+| Trello | `trello` | no | yes | From Trello's Export as JSON: open lists as columns, cards with their name, description (as notes), labels (in the nearest color), checklists (as tasks) and archived state, and custom fields of the text, number, checkbox and list kinds | Archived lists (their cards come in archived, in the last column), due dates, members, attachments, votes, stickers, comments, and other kinds of custom field. Trello due dates are not imported |
+| GitHub issues | `github` | no | yes | The JSON from `gh issue list --json number,title,body,labels,state,url,milestone,assignees`: open issues in the first column and closed ones in the last, which is marked as the done column, the issue number as the key (`GH-12`), labels, the body as notes, the address as a Link field, and the milestone and assignees as properties | Anything else the issue has |
 
 ```bash
 laneboard export "Software release" --format markdown -o release.md
@@ -278,7 +282,10 @@ laneboard restore previous
 ```
 
 `restore` first keeps what it replaces, so you can change your mind. It works while
-the board is running, and it works when the current file is broken. Copies of your file on another
+the board is running, and it works when the current file is broken. On the page, **Backups** (in
+**More**, the help sheet, the command palette, and the bar that says the file has a problem) lists the
+same copies, with when each was made and what it holds; **Restore** on one explains what will happen,
+asks you to confirm, restores it the same way, and reloads the boards. Copies of your file on another
 disk are still your job; these backups sit in the same folder.
 
 ## Command line
@@ -288,9 +295,10 @@ Every command takes `--help`. A board can be named by its name or id.
 | Command | Does |
 |---|---|
 | `laneboard` or `laneboard serve` | Run the board. `--open`, `--port PORT`, `--verbose` |
-| `laneboard boards` | List boards. `--json` |
+| `laneboard boards` | List the boards in use, in their order. `--archived` lists the archived boards instead, `--all` every board. `--json` |
+| `laneboard board BOARD` | Show a board's place and whether it is archived. `--archive` or `--restore`, `--rename NAME`, `--move-to N` (its place among the boards on its side, 1 being the first) |
 | `laneboard cards BOARD` | List cards. `--column NAME`, `--archived`, `--query Q` or `--view NAME`, `--sort S`, `--json` |
-| `laneboard search QUERY` | Find cards on every board, board by board. `--board B`, `--sort S`, `--json` |
+| `laneboard search QUERY` | Find cards on every board in use, board by board. `--board B`, `--archived-boards` to search archived boards too, `--sort S`, `--json` |
 | `laneboard add BOARD TITLE` | Add a card and print its key. `--column`, `--group`, `--summary` |
 | `laneboard move BOARD KEY COLUMN` | Move a card to the bottom of a column |
 | `laneboard archive BOARD KEY` | Archive a card. `--restore` brings it back |
@@ -306,7 +314,7 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard labels BOARD` | List labels. `--add NAME` (with `--color`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard properties BOARD` | List properties. `--add NAME --type TYPE` (with `--choices`, `--min`, `--max`, `--decimals`, `--unit`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard views BOARD` | List saved views. `--add NAME --query Q` (with `--sort`), `--remove NAME`, `--default NAME` or `none` |
-| `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C`, `--default VIEW` or `none` |
+| `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C`, `--default VIEW` or `none`, `--done-columns A,B` (the columns whose cards count as done; `""` for none, so the last column counts) |
 | `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing. `--format F` (default `auto`), `--preview` |
 | `laneboard export BOARD` | Write a board. `--format F` (default `laneboard`), `-o FILE`, `--force`, or `--all` for every board as Laneboard JSON |
 | `laneboard stats BOARD` | A board's numbers: columns, groups, labels, properties, tasks and ticks. `--json` |

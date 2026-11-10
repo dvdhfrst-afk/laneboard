@@ -413,7 +413,7 @@ class Stats(Case):
             "Ready            0           0 h",
             "In progress      2      1    2 h  over the limit",
             "Review           0           0 h",
-            "Done             0           0 h",
+            "Done             0           0 h  done",
             "",
             "Labels: Outside 1, no labels 2",
             "",
@@ -428,7 +428,7 @@ class Stats(Case):
         self.run_cli("new", "Empty")
         self.assertEqual(self.lines("stats", "Empty"), [
             "Empty: 0 cards", "", "Column       Cards  Limit", "Backlog          0", "Ready            0",
-            "In progress      0      1", "Review           0", "Done             0"])
+            "In progress      0      1", "Review           0", "Done             0  done"])
         self.unchanged("stats", "Nope", says="There's no board called 'Nope'.")
 
 

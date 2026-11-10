@@ -17,10 +17,10 @@ from . import __version__, formats, samples, storage
 from .properties import TYPE_NAMES, TYPES, find_property, property_text
 from .query import QueryError, broken_views, describe_error, run, search_boards
 from .schema import (CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, MAX_IMPORT_BYTES, NotFound, SCHEMA_VERSION, StaleRevision,
-                     StoreError, decode_text, load_bytes)
+                     StoreError, decode_text)
 from .server import BoardServer, encode_json
 from .stats import number_text, property_summary, summarize
-from .store import Store, default_data_path, outline, restore_backup, resolve_path
+from .store import Store, default_data_path, describe_backups, outline, restore_backup, resolve_path
 from .templates import describe, get_template
 
 DEFAULT_PORT = 8642
@@ -192,15 +192,39 @@ def count(n, word):
 
 def cmd_boards(args):
     store = Store(args.data, starter=False)  # looking doesn't create a file
-    boards = store.list_boards()
+    every = store.list_boards()
+    boards = every if args.all else [b for b in every if bool(b["archivedAt"]) == args.archived]
     if args.json:
         write_json(boards, None, False)
         return
     for b in boards:
         extra = f", {b['archived']} archived" if b["archived"] else ""
-        print(f"{b['id']}  {b['name']}  ({count(b['cards'], 'card')}{extra})")
+        shelved = "  [archived board]" if args.all and b["archivedAt"] else ""
+        print(f"{b['id']}  {b['name']}  ({count(b['cards'], 'card')}{extra}){shelved}")
     if not boards:
-        print("No boards yet.")
+        print("No archived boards." if args.archived else "No boards yet." if not every else "No boards in use.")
+    shelved = sum(1 for b in every if b["archivedAt"])
+    if shelved and not args.archived and not args.all:
+        print(f"{count(shelved, 'archived board')} not shown. See them with --archived or --all.")
+
+
+def cmd_board(args):
+    store = Store(args.data, starter=False)
+    board = store.get_board(find_board(store, args.board))
+    if args.rename is not None:
+        board = store.update_board(board["id"], {"name": args.rename})
+    if args.archive or args.restore:
+        board = store.update_board(board["id"], {"archived": bool(args.archive)})
+    if args.move_to is not None:
+        store.move_board(board["id"], args.move_to - 1)
+    listed = store.list_boards()
+    side = [b for b in listed if bool(b["archivedAt"]) == bool(board["archived"])]
+    place = next(n for n, b in enumerate(side, 1) if b["id"] == board["id"])
+    where = "archived boards" if board["archived"] else "boards in use"
+    summary = summarize(board)
+    print(f"{board['name']} ({board['id']}): {count(summary['cards'], 'card')}, {summary['done']} done")
+    print(f"Archived: since {board['archived']}" if board["archived"] else "Archived: no")
+    print(f"Place: {place} of {len(side)} {where}")
 
 
 def card_line(card, columns, labels=None):
@@ -259,7 +283,8 @@ def cmd_search(args):
         results = [(board, keys, considered)] if keys else []
     else:
         try:
-            results = search_boards(store.all_data()["boards"], args.query, sort)
+            boards = [b for b in store.all_data()["boards"] if args.archived_boards or not b["archived"]]
+            results = search_boards(boards, args.query, sort)
         except QueryError as e:
             raise pointed(e, args.query, sort) from None
     found = [(board, [next(c for c in board["cards"] if c["key"] == k) for k in keys], considered)
@@ -726,6 +751,12 @@ def cmd_views(args):
 LIMIT_POLICY_WORDS = {"warn": "warn (a column over its limit is flagged)", "refuse": "refuse (a full column takes no more cards)"}
 
 
+def done_columns_text(board):
+    """Which columns count as done, in words: their names, or the last column's when none is marked."""
+    marked = [c["name"] for c in board["columns"] if c["done"]]
+    return ", ".join(marked) if marked else f"{board['columns'][-1]['name']} (the last column, since none is marked)"
+
+
 def cmd_settings(args):
     store = Store(args.data, starter=False)
     board = store.get_board(find_board(store, args.board))
@@ -740,6 +771,11 @@ def cmd_settings(args):
         settings["defaultView"] = default_view(board, args.default)
     if settings:
         changes["settings"] = settings
+    if args.done_columns is not None:
+        done = {find_named(board["columns"], name.strip(), "column", board)
+                for name in args.done_columns.split(",") if name.strip()}
+        changes["columns"] = [{"id": c["id"], "name": c["name"], "limit": c["limit"], "done": c["id"] in done}
+                              for c in board["columns"]]
     if changes:
         board = store.update_board(board["id"], changes)
     names = {p["id"]: p["name"] for p in board["properties"]}
@@ -752,6 +788,7 @@ def cmd_settings(args):
     print(f"Limit policy: {LIMIT_POLICY_WORDS[board['settings']['limitPolicy']]}")
     print(f"Card face: {face}")
     print(f"Default view: {views.get(board['settings']['defaultView'], 'none')}")
+    print(f"Done columns: {done_columns_text(board)}")
 
 
 def cmd_import(args):
@@ -808,7 +845,7 @@ def cmd_stats(args):
 def stats_lines(board, summary):
     """A board's summary as text: totals, a table of columns, then groups, labels and properties."""
     head = [count(summary["cards"], "card")]
-    head += [f"{summary[key]} {key}" for key in ("blocked", "archived") if summary[key]]
+    head += [f"{summary[key]} {key}" for key in ("done", "blocked", "archived") if summary[key]]
     out = [f"{board['name']}: {', '.join(head)}"]
     for name, key in (("Tasks", "tasks"), ("Checklist ticks", "checks")):
         if summary[key]["total"]:
@@ -822,7 +859,8 @@ def stats_lines(board, summary):
     out.append("")
     for row, col in zip(table, [None] + summary["columns"]):
         line = "  ".join([row[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(row[1:], widths[1:])])
-        out.append(line.rstrip() + ("  over the limit" if col and col["over"] else ""))
+        marks = [mark for mark, on in (("done", col and col["done"]), ("over the limit", col and col["over"])) if on]
+        out.append(line.rstrip() + "".join("  " + mark for mark in marks))
     for title, entries, rest, rest_name in ((board["groupLabel"], summary["groups"], summary["noGroup"], "none"),
                                             ("Labels", summary["labels"], summary["noLabels"], "no labels")):
         if entries:
@@ -851,18 +889,14 @@ def _describe(item):
     """A backup, and whether it can actually be used."""
     size = f"{item['bytes'] / 1000:.0f} KB"
     when = datetime.fromtimestamp(item["modified"]).strftime("%Y-%m-%d %H:%M")
-    try:
-        with open(item["path"], "rb") as f:
-            data, _ = load_bytes(f.read(), item["name"])
-        contents = f"{count(len(data['boards']), 'board')}, {count(sum(len(b['cards']) for b in data['boards']), 'card')}"
-    except (OSError, StoreError):
-        contents = "can't be read"
+    contents = ("can't be read" if item["boards"] is None
+                else f"{count(item['boards'], 'board')}, {count(item['cards'], 'card')}")
     return f"{item['name']:<42} {when}  {size:>8}  {contents}"
 
 
 def cmd_backups(args):
     path = resolve_path(args.data)
-    found = storage.list_backups(path)
+    found = describe_backups(path)
     if not found:
         print(f"No backups of {path} yet. They appear after the first change.")
         return
@@ -931,7 +965,19 @@ def build_parser():
         return p
 
     run_options(sub.add_parser("serve", parents=[common], help="run the board (the default)", description="Run the board."))
-    command("boards", cmd_boards, "list boards").add_argument("--json", action="store_true", help="print JSON")
+    p = command("boards", cmd_boards, "list the boards in use, in their order")
+    shown = p.add_mutually_exclusive_group()
+    shown.add_argument("--archived", action="store_true", help="list the archived boards instead")
+    shown.add_argument("--all", action="store_true", help="list every board, archived ones too")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = command("board", cmd_board, "show a board's place and state, or archive, restore, rename or move it")
+    p.add_argument("board", help="board id or name")
+    state = p.add_mutually_exclusive_group()
+    state.add_argument("--archive", action="store_true", help="archive the board: it keeps everything, out of the way")
+    state.add_argument("--restore", action="store_true", help="bring an archived board back into use")
+    p.add_argument("--rename", metavar="NAME", help="give the board a new name")
+    p.add_argument("--move-to", metavar="N", type=int,
+                   help="put the board at place N among the boards on its side (1 is the first)")
     p = command("cards", cmd_cards, "list the cards on a board")
     p.add_argument("board", help="board id or name")
     p.add_argument("--column", help="only this column (id or name)")
@@ -945,6 +991,7 @@ def build_parser():
     p.add_argument("query", help="what to look for, as typed in the search box")
     p.add_argument("--board", help="only this board (id or name)")
     p.add_argument("--sort", metavar="S", help="the order within each column, like title or -points")
+    p.add_argument("--archived-boards", action="store_true", help="search archived boards too")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = command("add", cmd_add, "add a card and print its key")
     p.add_argument("board", help="board id or name")
@@ -1046,6 +1093,8 @@ def build_parser():
     p.add_argument("--card-face", metavar="A,B,C",
                    help="what cards show, in order: " + ", ".join(CARD_FACE_PARTS) + " and property names (\"\" for only the title)")
     p.add_argument("--default", metavar="NAME", help="the saved view the board opens with (by name or id), or none")
+    p.add_argument("--done-columns", metavar="A,B",
+                   help="the columns whose cards count as done (\"\" for none marked: then the last column counts)")
     p = command("import", cmd_import, "add boards from a file: Laneboard JSON, Markdown, a Trello export or a GitHub issue list")
     p.add_argument("file", help="the file, or - for standard input")
     p.add_argument("--format", type=str.lower, default="auto", choices=["auto"] + IMPORT_FORMATS,

@@ -16,11 +16,13 @@ header the change is applied regardless, so a script that wants to be careful sh
 | Method and path | Does | Answers |
 |---|---|---|
 | `GET /api/health` | Version and where the data is. Works when the file is broken | `{app, version, schema, data, backups}` |
-| `GET /api/boards` | List boards | `{boards: [{id, name, rev, cards, archived}]}` |
+| `GET /api/boards` | List every board, archived ones too, in the file's order | `{boards: [{id, name, rev, cards, archived, archivedAt}]}` |
+| `GET /api/overview` | Every board with what the boards overview shows | `{boards: [{id, name, description, rev, archivedAt, cards, done, notDone, archived, columns}]}` |
 | `POST /api/boards` | Create a board: `{name, description}`, or `{name, description, template}` to start from a template | `201 {board}` |
 | `GET /api/boards/<id>` | A board with its cards | `{board}` |
-| `PATCH /api/boards/<id>` | Change `name`, `description`, `prefix`, `groupLabel`, `template`, `columns`, `groups`, `checklists`, `labels`, `properties`, `views`, `settings` | `{board}` |
+| `PATCH /api/boards/<id>` | Change `name`, `description`, `prefix`, `groupLabel`, `template`, `columns`, `groups`, `checklists`, `labels`, `properties`, `views`, `settings`, `archived` | `{board}` |
 | `DELETE /api/boards/<id>` | Delete a board, keeping a backup first | `{deleted}` |
+| `POST /api/boards/<id>/move` | Put a board at `{position}` among the boards on its side (0 is the first) | `{boards}`, as `GET /api/boards` |
 | `GET /api/boards/<id>/export?format=laneboard` | Download the board, in any format that exports | The file |
 | `GET /api/boards/<id>/summary` | The board's numbers | `{summary}` |
 | `GET /api/boards/<id>/search?q=&sort=&archived=0` | Search one board | `{keys, total, matched}` |
@@ -31,7 +33,9 @@ header the change is applied regardless, so a script that wants to be careful sh
 | `PATCH /api/boards/<id>/cards/<key>/tasks/<task id>` | Change a task's `text` or `done` | `{board}` |
 | `DELETE /api/boards/<id>/cards/<key>/tasks/<task id>` | Remove a task | `{board}` |
 | `POST /api/boards/<id>/cards/<key>/transfer` | Move a card to another board: `{board, column, targetRev}` | `{board, target, key, dropped}` |
-| `GET /api/search?q=&sort=&archived=0` | Search every board | `{results: [{board, name, keys, total}]}` |
+| `GET /api/search?q=&sort=&archived=0&archivedBoards=0` | Search every board in use, or archived boards too with `archivedBoards=1` | `{results: [{board, name, keys, total}]}` |
+| `GET /api/backups` | List the backups, newest first. Works when the file is broken | `{backups: [{name, modified, bytes, boards, cards}]}` |
+| `POST /api/backups/restore` | Go back to a backup: `{name}` | `{restored: {boards, cards, kept}}` |
 | `GET /api/export` | Download the whole file, as Laneboard JSON | The file |
 | `GET /api/formats` | List the formats | `{formats: [{name, title, extension, mime, export, import}]}` |
 | `POST /api/import?format=auto&preview=0` | Add the boards in a file. All or nothing | `201 {boards: [{id, name, cards}], format, warnings}` |
@@ -43,7 +47,8 @@ header the change is applied regardless, so a script that wants to be careful sh
 | `DELETE /api/templates/<id>` | Delete a saved template, keeping a backup first | `{deleted}` |
 
 `PATCH` on a board may also send `moveCards`, `{removedColumnId: targetColumnId}`, along with `columns`, to
-move cards out of columns being removed. Without it, removing a column that holds cards is refused.
+move cards out of columns being removed. Without it, removing a column that holds cards is refused. A column
+sent with `done: true` counts as a done column, and one sent without `done` keeps the one it had.
 
 `labels`, `properties` and `views` are sent as whole lists, like `columns`: an entry keeps its `id`, one
 sent without an `id` keeps the id of the one with the same name, and a new one gets an id made from its
@@ -85,7 +90,34 @@ property a board doesn't have leaves that board's cards in board order. It is an
 read the search, or none of the boards that read it can read the sort; the error is from the board that
 read furthest.
 
-Searches change nothing and need no `rev`.
+Searches change nothing and need no `rev`. Archived boards are left out of `GET /api/search` unless
+`archivedBoards=1`; a search on one board works whether it is archived or not.
+
+## Archived boards and the order of boards
+
+`PATCH /api/boards/<id>` with `{"archived": true}` archives a board: it keeps every card and setting and
+can still be opened, searched on its own, exported and deleted, but the page's board picker and a search of
+every board leave it out. `{"archived": false}` restores it. `archivedAt` in the list is when it was archived,
+or `null`. Archiving goes through the board's `rev` like any change.
+
+The boards are listed in the file's order, and the page shows them that way. `POST /api/boards/<id>/move`
+with `{"position": 0}` makes a board the first of the boards on its side, the boards in use or the archived
+ones; a position past the end puts it last. Moving a board changes no board, so no `rev` goes up and no
+`If-Match` is needed.
+
+`GET /api/overview` is for the boards overview page. Each board has its `description`, `cards` on the board,
+`done` and `notDone` (split by done columns, as in the summary), `archived` cards, and `columns`,
+`[{id, name, cards, limit, done}]`.
+
+## Backups
+
+`GET /api/backups` lists what `laneboard backups` lists: `name` (what restoring takes), `modified` (an ISO
+8601 time), `bytes`, and the `boards` and `cards` it holds, which are `null` when the copy can't be read.
+`POST /api/backups/restore` with `{"name": "..."}` makes that backup the live file, as `laneboard restore`
+does: the name must be one in the list, exactly, so it can't point anywhere else; the file it replaces is
+kept first, as a backup named in `kept`; and each board that differs gets a higher `rev`, so open pages
+reload it. It works
+when the boards file is broken, which is when it is most needed.
 
 ## Templates
 
@@ -147,7 +179,8 @@ and describes what would be added. In each board, `columns` counts the cards on 
 | Key | Holds |
 |---|---|
 | `cards`, `blocked`, `archived` | How many cards there are, how many are blocked, and how many are archived |
-| `columns` | `[{id, name, cards, limit, over, sums}]` in board order. `over` is true when a column holds more than its limit, and `sums` totals each number property: `{property id: total}` |
+| `done`, `notDone` | How many cards are in a done column, and how many aren't. The done columns are the ones marked `done`, or the last column when none is |
+| `columns` | `[{id, name, cards, limit, over, done, sums}]` in board order. `over` is true when a column holds more than its limit, `done` when its cards count as done, and `sums` totals each number property: `{property id: total}` |
 | `groups`, `labels` | `[{id, name, color, cards}]`, with `noGroup` and `noLabels` counting the cards with none |
 | `properties` | One entry per property, `{id, name, type, cards}`, where `cards` counts the cards with a value (a ticked box, for checkboxes). Numbers add `total`, `average`, `min`, `max`, `unit` and `decimals`; ratings add `average` and `outOf`; choices add `options`, `[{id, name, color, cards}]` |
 | `tasks`, `checks` | `{done, total}` for the cards' tasks and checklist ticks |

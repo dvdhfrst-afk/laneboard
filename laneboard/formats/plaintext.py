@@ -1,28 +1,31 @@
 """Plain text for pasting into a message: each column with its count, then one `KEY  Title [labels]` line per card.
 
-Archived cards are left out. Keys are padded to the same width so titles line up.
+A done column says so after its count, like `Done (4, done)`. Archived cards are left out. Keys are padded to the same width so titles line up.
 """
 from __future__ import annotations
 
+from ..schema import done_columns
 from .common import Format, Lookups, columns_with_cards
 
 
-def _count(col, cards):
+def _count(col, cards, done):
+    mark = ", done" if col["id"] in done else ""
     if not col.get("limit"):
-        return f"({len(cards)})"
+        return f"({len(cards)}{mark})"
     over = ", over the limit" if len(cards) > col["limit"] else ""
-    return f"({len(cards)}/{col['limit']}{over})"
+    return f"({len(cards)}/{col['limit']}{over}{mark})"
 
 
 def export(board):
     look = Lookups(board)
     columns = columns_with_cards(board)
+    done = done_columns(board)
     width = max((len(card["key"]) for _, cards in columns for card in cards), default=0)
     out = [board["name"]]
     if board.get("description"):
         out.append(board["description"])
     for col, cards in columns:
-        out += ["", f"{col['name']} {_count(col, cards)}"]
+        out += ["", f"{col['name']} {_count(col, cards, done)}"]
         for card in cards:
             labels = ", ".join(lab["name"] for lab in look.card_labels(card))
             out.append(f"{card['key'].ljust(width)}  {card['title']}" + (f" [{labels}]" if labels else ""))

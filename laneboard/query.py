@@ -29,7 +29,7 @@ import unicodedata
 from fractions import Fraction
 
 from .properties import TYPES, _shown, find_property
-from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, key_sort, tickable_ids
+from .schema import ANY_KEY_RE, MAX_DECIMALS, MAX_QUERY, StoreError, done_columns, key_sort, tickable_ids
 
 MAX_DEPTH = 20   # parentheses inside parentheses
 
@@ -458,8 +458,8 @@ class _Compiler:
             over = {c.get("id") for c in self.columns if c.get("limit") and counts.get(c.get("id"), 0) > c["limit"]}
             return (lambda v: v.card.get("column") in over), 1
         if word == "done":
-            last = self.columns[-1].get("id") if self.columns else None
-            return (lambda v: last is not None and v.card.get("column") == last), 1
+            done = done_columns(self.board)
+            return (lambda v: v.card.get("column") in done), 1
         raise QueryError(f'is: can be {_listed(IS_WORDS)}, not "{_shown(tok.value)}".', tok.value_pos)
 
     def q_has(self, tok, positive):

@@ -24,7 +24,8 @@
    },
    {
     "name": "Published",
-    "limit": null
+    "limit": null,
+    "done": true
    }
   ],
   "labels": [

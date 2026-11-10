@@ -76,7 +76,8 @@ class UpgradeTest(FileCase):
         store = Store(self.path)
         board = store.get_board("b-0a1b2c3d")
         want = self.old["boards"][0]
-        added = {"labels": [], "properties": [], "views": [], "settings": schema.default_settings()}
+        added = {"labels": [], "properties": [], "views": [], "settings": schema.default_settings(), "archived": None,
+                 "columns": [{**col, "done": False} for col in want["columns"]]}
         self.assertEqual({k: v for k, v in board.items() if k != "cards"}, {**{k: v for k, v in want.items() if k != "cards"}, **added})
         for got, expected in zip(board["cards"], want["cards"]):
             self.assertEqual(got, {**expected, "archived": None, "labels": [], "properties": {}, "tasks": []})

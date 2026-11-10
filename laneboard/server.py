@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 import re
 import socket
 import sys
@@ -19,7 +20,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from . import __version__, formats, samples, stats, storage
 from .query import QueryError, run, search_boards
 from .schema import MAX_IMPORT_BYTES, SCHEMA_VERSION, slug
-from .store import Store, StoreError, outline
+from .store import Store, StoreError, describe_backups, outline
 from .templates import describe
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -54,6 +55,9 @@ ROUTES = [
     ("GET", re.compile(r"/api/formats"), "list_formats"),
     ("POST", re.compile(r"/api/import"), "import_file"),
     ("GET", re.compile(r"/api/search"), "search_all"),
+    ("GET", re.compile(r"/api/overview"), "overview"),
+    ("GET", re.compile(r"/api/backups"), "list_backups"),
+    ("POST", re.compile(r"/api/backups/restore"), "restore_backup"),
     ("GET", re.compile(r"/api/templates"), "list_templates"),
     ("POST", re.compile(r"/api/templates"), "save_template"),
     ("PATCH", re.compile(rf"/api/templates/{TEMPLATE}"), "update_template"),
@@ -63,6 +67,7 @@ ROUTES = [
     ("GET", re.compile(rf"/api/boards/{BOARD}"), "get_board"),
     ("PATCH", re.compile(rf"/api/boards/{BOARD}"), "update_board"),
     ("DELETE", re.compile(rf"/api/boards/{BOARD}"), "delete_board"),
+    ("POST", re.compile(rf"/api/boards/{BOARD}/move"), "move_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/export"), "export_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/search"), "search_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/summary"), "board_summary"),
@@ -285,6 +290,23 @@ class Handler(BaseHTTPRequestHandler):
     def api_update_board(self, board):
         return 200, {"board": self.store.update_board(board, self._body(), rev=self._rev())}
 
+    def api_move_board(self, board):
+        self.store.move_board(board, self._body().get("position"))
+        return 200, {"boards": self.store.list_boards()}
+
+    def api_overview(self):
+        return 200, {"boards": [stats.overview(b) for b in self.store.all_data()["boards"]]}
+
+    def api_list_backups(self):
+        # Doesn't read the boards file itself, so the page can list backups when the file is broken.
+        return 200, {"backups": [
+            {"name": b["name"], "bytes": b["bytes"], "boards": b["boards"], "cards": b["cards"],
+             "modified": datetime.fromtimestamp(b["modified"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+            for b in describe_backups(self.store.path)]}
+
+    def api_restore_backup(self):
+        return 200, {"restored": self.store.restore(self._body().get("name"))}
+
     def api_delete_board(self, board):
         self.store.delete_board(board, rev=self._rev())
         return 200, {"deleted": board}
@@ -367,7 +389,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_search_all(self):
         text, sort, archived = self._search_params()
-        results = search_boards(self.store.all_data()["boards"], text, sort, archived)
+        everything = self._flag("archivedBoards", "archivedBoards must be 0 (leave archived boards out) or 1 (search them too).")
+        boards = [b for b in self.store.all_data()["boards"] if everything or not b["archived"]]
+        results = search_boards(boards, text, sort, archived)
         return 200, {"results": [{"board": b["id"], "name": b["name"], "keys": keys, "total": considered}
                                  for b, keys, considered in results]}
 

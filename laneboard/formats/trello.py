@@ -2,7 +2,8 @@
 
 Open lists become columns, in Trello's order. Cards keep their name, description (as notes), labels
 (Trello's colors mapped to Laneboard's) and checklists (as the card's tasks). Archived cards stay
-archived, and the cards of an archived list come in as archived cards. Custom fields become properties
+archived, and the cards of an archived list come in as archived cards in the board's done column (its
+last). Custom fields become properties
 where Laneboard has a matching kind: text, number, checkbox, and list (as a choice). What Laneboard
 doesn't keep (members, attachments, votes, stickers, comments, due dates) is left out, and the import
 says how much.
@@ -194,7 +195,7 @@ def import_(raw):
         raise StoreError("That isn't a Trello board export: it needs the lists and cards that Trello's Export as JSON writes.")
     fit, warnings = Fitter(), []
     columns, column_of, closed, order = _columns(data, fit)
-    first = columns[0]["name"]
+    first, last = columns[0]["name"], columns[-1]["name"]  # the last column counts as done
     labels, label_of = _labels(data, fit)
     raw_cards = objects(data["cards"], WHERE, "cards")
     fields = _Fields(data, raw_cards, fit)
@@ -211,7 +212,7 @@ def import_(raw):
         at = f"Card {n} in that Trello export"
         title, notes = fit.title(field(raw, "name", str, at), field(raw, "desc", str, at) or "")
         list_id = field(raw, "idList", str, at)
-        card = {"title": title, "column": column_of.get(list_id, first)}
+        card = {"title": title, "column": last if list_id in closed else column_of.get(list_id, first)}
         notes = fit.text(notes, MAX_TEXT, ("card's notes", "cards' notes"), multiline=True)
         if notes:
             card["notes"] = notes
@@ -243,7 +244,7 @@ def import_(raw):
     if closed:
         names = join_words(sorted(closed.values(), key=str.casefold))
         cards_in = (f" The {plural(moved, 'card')} in {'it' if len(closed) == 1 else 'them'} came in as "
-                    f"{'an archived card' if moved == 1 else 'archived cards'} in {first}." if moved else "")
+                    f"{'an archived card' if moved == 1 else 'archived cards'} in {last}." if moved else "")
         warnings.append(f"Skipped {plural(len(closed), 'archived list')} ({names}).{cards_in}")
     if lost:
         warnings.append(f"{plural(lost, 'card')} named a list that isn't in the export, so "

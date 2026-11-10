@@ -10,7 +10,9 @@ One JSON file in UTF-8. You can read it, edit it by hand, and keep it in version
 }
 ```
 
-`templates` holds the board templates you saved. See [Saved templates](#saved-templates).
+`boards` are in the order the page and `laneboard boards` show them; moving a board on the boards overview
+or with `laneboard board BOARD --move-to N` changes this order. `templates` holds the board templates you
+saved. See [Saved templates](#saved-templates).
 
 ## A board
 
@@ -22,7 +24,8 @@ One JSON file in UTF-8. You can read it, edit it by hand, and keep it in version
 | `groupLabel` | What a group is on this board: Repo, Client, Project |
 | `rev` | Goes up by one with every change. Pages use it to notice changes |
 | `created`, `updated` | ISO 8601 times |
-| `columns` | `[{id, name, limit}]`, left to right. `limit` is a number or `null` |
+| `archived` | `null`, or the ISO 8601 time the board was archived. An archived board keeps everything; the page's board picker and a search of every board leave it out. A board you import comes in use. Missing means `null` |
+| `columns` | `[{id, name, limit, done}]`, left to right. `limit` is a number or `null`. `done` is `true` for a column whose cards count as done; when no column has it, the last column counts. Missing means `false` |
 | `groups` | `[{id, name, prefix, color, link, details}]`. `details` is `[{label, value}]` |
 | `labels` | `[{id, name, color}]`. Names differ, ignoring case |
 | `properties` | `[{id, name, type, onCard, ...}]`, the values every card can hold. See below |

@@ -168,7 +168,7 @@ function cardView(card, notes, status, parts, flush) {
         column.value = cardBy(card.key)?.column ?? card.column;
       });
     },
-  }, b.columns.map((c) => h("option", { value: c.id, text: c.name })));
+  }, b.columns.map((c) => h("option", { value: c.id, text: index.done.has(c.id) ? `${c.name} (done)` : c.name })));
   column.value = card.column;
   const moveSlot = h("div");
   const moveButton = otherBoards().length && !card.archived ? h("button", { type: "button", text: "Move to board", "aria-expanded": "false" }) : null;

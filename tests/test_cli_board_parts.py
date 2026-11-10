@@ -310,19 +310,33 @@ class SettingsTest(Case):
     def test_showing_and_changing(self):
         self.assertEqual(self.lines("settings", "Work"), [
             "Name: Work", "Key prefix: T", "Limit policy: warn (a column over its limit is flagged)",
-            "Card face: group, labels, field, progress, blocked", "Default view: none"])
+            "Card face: group, labels, field, progress, blocked", "Default view: none",
+            "Done columns: Done (the last column, since none is marked)"])
         self.run_cli("properties", "Work", "--add", "Points", "--type", "number")
         out = self.lines("settings", "Work", "--name", "Office", "--description", "Line one", "--prefix", "OF",
                          "--limit-policy", "refuse", "--card-face", "labels, points ,blocked")
         self.assertEqual(out, ["Name: Office", "Description: Line one", "Key prefix: OF",
                                "Limit policy: refuse (a full column takes no more cards)", "Card face: labels, Points, blocked",
-                               "Default view: none"])
+                               "Default view: none", "Done columns: Done (the last column, since none is marked)"])
         board = self.board("Office")
         self.assertEqual(board["settings"]["cardFace"], ["labels", "points", "blocked"])
         self.assertTrue(board["properties"][0]["onCard"])
         self.assertIn("Card face: (only the title)", self.lines("settings", "Office", "--card-face", ""))
         self.run_cli("add", "Office", "Keyed")
         self.assertEqual(self.board("Office")["cards"][0]["key"], "OF-1")
+
+    def test_done_columns(self):
+        self.run_cli("add", "Work", "Write it", "--column", "Review")
+        self.run_cli("add", "Work", "Ship it", "--column", "Done")
+        self.assertIn("Done columns: Review, Done", self.lines("settings", "Work", "--done-columns", "review, Done"))
+        self.assertEqual([c["done"] for c in self.board("Work")["columns"]], [False, False, False, True, True])
+        self.assertEqual(self.lines("cards", "Work", "--query", "is:done"), self.lines("cards", "Work"))
+        self.assertIn("Work: 2 cards, 2 done", self.lines("stats", "Work"))
+        self.assertIn("Done columns: Done (the last column, since none is marked)",
+                      self.lines("settings", "Work", "--done-columns", ""))
+        self.assertEqual([c["done"] for c in self.board("Work")["columns"]], [False] * 5)
+        self.assertIn("Work: 2 cards, 1 done", self.lines("stats", "Work"))
+        self.unchanged("settings", "Work", "--done-columns", "Shipped", says="Work has no column called 'Shipped'")
 
     def test_refusals(self):
         self.unchanged("settings", "Work", "--limit-policy", "stop", code=2, says="invalid choice")

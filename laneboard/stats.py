@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from .properties import TYPES
-from .schema import tickable_ids
+from .schema import done_columns, tickable_ids
 
 
 def _whole(number):
@@ -90,8 +90,10 @@ def property_summary(entry, prop, active):
 def summarize(board):
     """The board's numbers as a JSON-safe dict.
 
-    `cards`, `archived`, `blocked`: counts. `columns`: `{id, name, cards, limit, over, sums}` in board
-    order, where `over` means more cards than the limit and `sums` totals each number property.
+    `cards`, `archived`, `blocked`: counts. `done` and `notDone` split `cards` by whether a card is in a
+    done column (see `schema.done_columns`). `columns`: `{id, name, cards, limit, over, done, sums}` in
+    board order, where `over` means more cards than the limit, `done` that it is a done column, and `sums`
+    totals each number property.
     `groups` and `labels`: `{id, name, color, cards}`, with `noGroup` and `noLabels` for the rest.
     `properties`: one entry per property, `{id, name, type, cards}` where `cards` is how many cards
     have a value (a ticked box, for checkboxes), plus `total`, `average`, `min`, `max`, `unit` and
@@ -104,10 +106,11 @@ def summarize(board):
     numbers = [p for p in props if p["type"] == "number"]
     tickable = tickable_ids(board)
 
+    done = done_columns(board)
     columns = {}
     for col in board.get("columns") or []:
         columns[col["id"]] = {"id": col["id"], "name": col["name"], "cards": 0, "limit": col.get("limit"), "over": False,
-                              "_values": {p["id"]: [] for p in numbers}}
+                              "done": col["id"] in done, "_values": {p["id"]: [] for p in numbers}}
     groups = {g["id"]: 0 for g in board.get("groups") or []}
     labels = {lab["id"]: 0 for lab in board.get("labels") or []}
     values = {p["id"]: [] for p in props}
@@ -142,8 +145,11 @@ def summarize(board):
         column["over"] = bool(column["limit"]) and column["cards"] > column["limit"]
         column["sums"] = {pid: _total(found, by_id[pid].get("decimals", 0)) for pid, found in column.pop("_values").items()}
 
+    finished = sum(1 for card in active if card.get("column") in done)
     return {
         "cards": len(active),
+        "done": finished,
+        "notDone": len(active) - finished,
         "archived": len(cards) - len(active),
         "blocked": blocked,
         "columns": list(columns.values()),
@@ -158,3 +164,24 @@ def summarize(board):
         "tasks": {"done": tasks_done, "total": tasks_total},
         "checks": {"done": ticks_done, "total": len(tickable) * len(active)},
     }
+
+
+def overview(board):
+    """One board as the boards overview lists it, light enough to list every board at once: `{id, name,
+    description, rev, archivedAt, cards, done, notDone, archived, columns}`, where `columns` is `{id, name, cards,
+    limit, done}` in board order. Counts are as in `summarize`: archived cards count only in `archived`."""
+    done = done_columns(board)
+    held = {col["id"]: 0 for col in board.get("columns") or []}
+    archived = 0
+    for card in board.get("cards") or []:
+        if card.get("archived"):
+            archived += 1
+        elif card.get("column") in held:
+            held[card["column"]] += 1
+    finished = sum(n for cid, n in held.items() if cid in done)
+    cards = sum(held.values())
+    return {"id": board["id"], "name": board["name"], "description": board.get("description", ""), "rev": board.get("rev"),
+            "archivedAt": board.get("archived"), "cards": cards, "done": finished, "notDone": cards - finished,
+            "archived": archived,
+            "columns": [{"id": col["id"], "name": col["name"], "cards": held[col["id"]], "limit": col.get("limit"),
+                         "done": col["id"] in done} for col in board.get("columns") or []]}

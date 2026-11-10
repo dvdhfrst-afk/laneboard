@@ -85,6 +85,7 @@ export function openSettings() {
     row.append(
       field("Column", h("input", { class: "c-name", maxLength: 40, value: c.name })),
       field("Limit", h("input", { class: "c-limit", type: "number", min: 1, max: 999, step: 1, value: c.limit ?? "", placeholder: "None" })),
+      h("label", { class: "check-line c-done-line" }, h("input", { type: "checkbox", class: "c-done", checked: !!c.done }), "Done"),
       h("div", { class: "mini" },
         h("button", { type: "button", class: "icon", title: "Move up", "aria-label": "Move up", text: "↑",
           onclick: () => { row.previousElementSibling?.before(row); dirty(); } }),
@@ -175,7 +176,8 @@ export function openSettings() {
         template: template.value.split("\n").map((l) => l.trim()).filter(Boolean),
         columns: staying.map((r) => {
           const limit = $(".c-limit", r).value;
-          return { id: r.dataset.id || undefined, name: $(".c-name", r).value, limit: limit === "" ? null : Number(limit) };
+          return { id: r.dataset.id || undefined, name: $(".c-name", r).value, limit: limit === "" ? null : Number(limit),
+            done: $(".c-done", r).checked };
         }),
         groups: [...groups.children].map((r) => ({
           id: r.dataset.id || undefined, name: $(".g-name", r).value, prefix: $(".g-prefix", r).value.trim(),
@@ -225,7 +227,8 @@ export function openSettings() {
       field("Group label", groupLabel, "What a group is on this board: Repo, Client, Project.")),
     field("New card sections", template, "One name per line. Every new card starts with these sections; any left empty aren't saved."),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns" }),
-      h("span", { class: "hint", text: "Top to bottom here is left to right on the board. A limit is how many cards a column should hold." }),
+      h("span", { class: "hint", text: "Top to bottom here is left to right on the board. A limit is how many cards a column should hold. "
+        + "Cards in a column ticked Done count as done in search (is:done), the summary and exports; with none ticked, the last column counts." }),
       cols, h("div", {}, h("button", { type: "button", text: "Add column", onclick: () => { $(".c-name", addCol()).focus(); dirty(); } }))),
     policy,
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Groups" }),

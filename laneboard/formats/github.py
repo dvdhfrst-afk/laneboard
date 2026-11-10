@@ -1,7 +1,7 @@
 """GitHub issues: a board from the JSON that `gh issue list --json number,title,body,labels,state,url,milestone,assignees` writes.
 
 The board gets the usual new-board columns. Open issues go in the first column and closed ones in the
-last. Each issue keeps its number in its key (issue 12 is GH-12), its labels (GitHub's colors mapped to
+last, which is marked as the done column. Each issue keeps its number in its key (issue 12 is GH-12), its labels (GitHub's colors mapped to
 the nearest of Laneboard's), its body as notes and its address as a Link field. Milestones become a
 choice property called Milestone, and assignees a property called Assignees that can hold several.
 """
@@ -101,6 +101,7 @@ def import_(raw):
     props = {p["name"]: p for p in clean_definitions({"properties": [], "cards": []}, raw_props)}
 
     columns = [{"name": name, "limit": limit} for name, limit in _store.DEFAULT_COLUMNS]
+    columns[-1]["done"] = True
     keys, repeated, cards = set(), 0, []
     for issue in issues:
         title, notes = fit.title(issue["title"], issue["body"])

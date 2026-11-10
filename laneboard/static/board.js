@@ -1,6 +1,6 @@
 // Drawing the open board: the header, the columns and the cards on them, the groups table, and what an empty page offers.
 
-import { activeCards, cardsIn, filterParams, groupOf, index, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
+import { activeCards, cardsIn, filterParams, groupOf, index, isDone, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
 import { countBy, plural } from "./util.js";
 import { $, groupLink, groupTag, h, rich } from "./dom.js";
 import { renderMenu } from "./menu.js";
@@ -130,6 +130,8 @@ export function renderColumns() {
           "aria-label": `${closed ? "Show" : "Hide"} the cards in ${col.name}`, text: closed ? "▸" : "▾", onclick: () => toggleCollapsed(col.id) }),
         h("h2", { text: col.name }),
         h("div", { class: "right" },
+          index.done.has(col.id) && h("span", { class: "done-mark", role: "img", "aria-label": "Done column",
+            title: "A done column: its cards count as done", text: "✓" }),
           h("span", { class: over ? "count over" : full ? "count full" : "count",
             title: col.limit ? (full ? `Full: limit ${col.limit}, and this board takes no more cards` : `Limit ${col.limit}`) : null,
             text: narrowed ? `${shown.length} of ${all.length}` : col.limit ? `${all.length} / ${col.limit}` : String(all.length) }),
@@ -184,7 +186,9 @@ function faceParts() {
     progress: (card) => {
       const p = progress(card);
       const what = p.ticks && p.tasks ? "Checklist lines ticked and tasks done" : p.tasks ? "Tasks done" : "Checklist lines ticked";
-      return p.total > 0 && h("span", { class: `ticks${p.done === p.total ? " all" : ""}`, title: what, text: `${p.done}/${p.total}` });
+      const done = isDone(card);
+      return p.total > 0 && h("span", { class: `ticks${p.done === p.total ? " all" : ""}`,
+        title: done ? `${what}. The card is in a done column.` : what, text: `${done ? "✓ " : ""}${p.done}/${p.total}` });
     },
     blocked: (card) => card.blocked && h("span", { class: "flag", text: "Blocked" }),
   };
