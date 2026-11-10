@@ -11,9 +11,8 @@ import html
 import re
 
 from .. import stats
-from ..properties import TYPES
 from ..schema import COLORS, LINK_RE
-from .common import Format, Lookups, archived_cards, columns_with_cards, plural
+from .common import Format, Lookups, archived_cards, columns_with_cards
 
 _LINK = re.compile(r"(https?://[^\s<>\"'`)\]]+)")
 _ENDING = re.compile(r"[.,;:!?]+$")  # the period ending a sentence isn't part of the address
@@ -127,26 +126,6 @@ def _tag(text, color, extra=""):
     return f'<li class="tag c-{_color(color)}{extra}">{_e(text)}</li>'
 
 
-def _number(value, prop):
-    return TYPES["number"].format_text(value, prop)
-
-
-def _property_summary(entry, prop, active):
-    if "total" in entry:
-        if not entry["cards"]:
-            return "No values yet"
-        return (f"Total {_number(entry['total'], prop)}, average {_number(entry['average'], prop)}, from "
-                f"{_number(entry['min'], prop)} to {_number(entry['max'], prop)}, on {plural(entry['cards'], 'card')}")
-    if "outOf" in entry:
-        if not entry["cards"]:
-            return "No ratings yet"
-        return f"Average {entry['average']:g} out of {entry['outOf']}, on {plural(entry['cards'], 'card')}"
-    if "options" in entry:
-        return ", ".join(f"{option['name']} {option['cards']}" for option in entry["options"])
-    verb = "Ticked" if entry["type"] == "checkbox" else "Set"
-    return f"{verb} on {entry['cards']} of {plural(active, 'card')}"
-
-
 def _summary(board, summary):
     numbers = [p for p in board.get("properties") or [] if p.get("type") == "number"]
     out = ['<section class="summary" aria-labelledby="summary">', '<h2 id="summary">Summary</h2>', '<dl class="totals">']
@@ -161,7 +140,7 @@ def _summary(board, summary):
             f'<th class="n" scope="col">Limit</th>{head}</tr></thead>', "<tbody>"]
     for col in summary["columns"]:
         flag = ' <span class="over">over</span>' if col["over"] else ""
-        sums = "".join(f'<td class="n">{_e(_number(col["sums"][p["id"]], p))}</td>' for p in numbers)
+        sums = "".join(f'<td class="n">{_e(stats.number_text(col["sums"][p["id"]], p))}</td>' for p in numbers)
         out.append(f'<tr><th scope="row">{_e(col["name"])}</th><td class="n">{col["cards"]}{flag}</td>'
                    f'<td class="n">{_e(col["limit"] or "")}</td>{sums}</tr>')
     out.append("</tbody></table></div>")
@@ -178,7 +157,7 @@ def _summary(board, summary):
     if summary["properties"]:
         out += ['<h3>Properties</h3>', '<div class="table"><table><tbody>']
         for entry in summary["properties"]:
-            text = _property_summary(entry, props[entry["id"]], summary["cards"])
+            text = stats.property_summary(entry, props[entry["id"]], summary["cards"])
             out.append(f'<tr><th scope="row">{_e(entry["name"])}</th><td>{_e(text)}</td></tr>')
         out.append("</tbody></table></div>")
     out.append("</section>")

@@ -13,10 +13,10 @@ import math
 import re
 
 from ..properties import _name_key, TYPES, clean_definitions
-from ..schema import (MAX_CHOICE_NAME, MAX_CHOICES, MAX_COLUMNS, MAX_DECIMALS, MAX_NAME, MAX_PROPERTIES,
-                      MAX_PROPERTY_NAME, MAX_PROPERTY_TEXT, MAX_SUMMARY, MAX_TEXT, StoreError)
-from .common import (MAX_CARD_LABELS, MAX_COLUMN_NAME, MAX_LABEL_NAME, MAX_LABELS, MAX_TASK_TEXT, MAX_TASKS, Fitter,
-                     Format, ImportResult, field, join_words, objects, plural, read_json)
+from ..schema import (MAX_CARD_LABELS, MAX_CHOICE_NAME, MAX_CHOICES, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_DECIMALS,
+                      MAX_LABEL_NAME, MAX_LABELS, MAX_NAME, MAX_PROPERTIES, MAX_PROPERTY_NAME, MAX_PROPERTY_TEXT,
+                      MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT, StoreError)
+from .common import Fitter, Format, ImportResult, field, join_words, objects, plural, read_json
 
 COLORS = {"green": "green", "yellow": "amber", "orange": "amber", "red": "rose", "purple": "violet", "blue": "blue",
           "sky": "teal", "lime": "green", "pink": "rose", "black": "slate"}

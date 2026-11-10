@@ -14,18 +14,7 @@ from typing import List, NamedTuple
 
 from .. import schema
 from ..properties import property_text
-from ..schema import BadFile, StoreError, key_sort
-
-MAX_IMPORT_BYTES = 64_000_000  # the same limit the server puts on an import request
-
-# Limits of the board data model that imports fit other programs' data into.
-MAX_COLUMN_NAME = 40
-MAX_FIELD_TEXT = 500
-MAX_LABELS = 50
-MAX_LABEL_NAME = 40
-MAX_CARD_LABELS = 20
-MAX_TASKS = 100
-MAX_TASK_TEXT = 300
+from ..schema import MAX_IMPORT_BYTES, BadFile, StoreError, key_sort
 
 
 class ImportResult(NamedTuple):

@@ -120,6 +120,23 @@ class Templates(Case):
         self.assertEqual(len(self.board("Again")["cards"]), 5)
         self.assertEqual(self.board("Work")["rev"], 1, "saving templates never changes a board")
 
+    def test_check_warns_about_saved_templates_that_make_no_working_board(self):
+        self.run_cli("new", "Work")
+        with open(self.data, encoding="utf-8") as f:
+            data = json.load(f)
+        data["templates"] = [{"id": "broken-view", "name": "Broken view", "description": "", "cards": [], "board": {
+            "columns": [{"name": "To do"}], "views": [{"name": "Big", "query": "label:bug", "sort": ""}]}}]
+        with open(self.data, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        self.assertEqual(self.lines("check")[-3:], [
+            "Warning: the template Broken view has a saved view \"Big\" that doesn't work: This board has no labels.",
+            "No board can be made from those templates as they are. Fix them in the file, or delete them with "
+            "laneboard templates delete.", "OK"])
+        self.unchanged("new", "X", "--template", "broken view", says="The saved view \"Big\" can't be saved")
+        self.run_cli("templates", "delete", "Broken view", "--yes")
+        self.assertEqual(self.lines("check")[-1:], ["OK"])
+        self.assertNotIn("Warning", self.run_cli("check")[0])
+
 
 if __name__ == "__main__":
     import unittest

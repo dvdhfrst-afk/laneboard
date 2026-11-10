@@ -192,11 +192,13 @@ class FailureTest(CliCase):
     def test_bad_import_files(self):
         self.run_cli("boards")
         bad = os.path.join(self.tmp.name, "bad.json")
-        for content, phrase in ((b"{nope", "isn't valid JSON"), (b"", "is empty"), (b"\x00\xff\x89", "UTF-8"), (b"[1]", "must hold a JSON object"),
-                                (b'{"cards": []}', "Board name")):
+        for content, phrase, given in ((b"{nope", "isn't valid JSON", ()), (b"", "is empty", ()), (b"\x00\xff\x89", "UTF-8", ()),
+                                       (b"[1]", "can't tell what that JSON file is", ()),
+                                       (b'{"cards": []}', "can't tell what that JSON file is", ()),
+                                       (b'{"cards": []}', "Board name", ("--format", "laneboard"))):
             with open(bad, "wb") as f:
                 f.write(content)
-            _, err = self.run_cli("import", bad, code=1)
+            _, err = self.run_cli("import", bad, *given, code=1)
             self.assertIn(phrase, err)
 
     def test_a_broken_data_file_is_explained_and_left_alone(self):

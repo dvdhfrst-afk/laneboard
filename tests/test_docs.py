@@ -82,8 +82,9 @@ class ExamplesRun(unittest.TestCase):
     def test_examples(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "LANEBOARD_DATA": os.path.join(tmp, "try.json"), "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
-            with open(os.path.join(tmp, "moving.json"), "w", encoding="utf-8") as f:
-                f.write(blocks("docs/examples.md", ("json",))[0])
+            for name, marker in (("moving.json", '"Moving house"'), ("garage.json", '"lists"')):
+                with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:
+                    f.write(next(b for b in blocks("docs/examples.md", ("json",)) if marker in b))
             outputs = [(line, self.run_line(line, tmp, env)) for line in blocks("docs/examples.md")]
             found = dict(outputs)
             self.assertEqual(found['laneboard add "Software release" "Write the upgrade notes" --column "To do" '
@@ -103,6 +104,11 @@ class ExamplesRun(unittest.TestCase):
             self.assertEqual(found['laneboard templates save "Software release" "Release board" --description '
                                    '"Components, a release checklist and new card sections."'].strip(), shown[12])
             self.assertEqual(found['laneboard views "Next quarter"'].strip(), shown[13])
+            self.assertEqual(found["laneboard import next.md --preview"].strip(), shown[14])
+            self.assertEqual(found["laneboard import garage.json --preview"].strip(), shown[15])
+            self.assertIn("Warning: Left out the due dates on 1 card.", found["laneboard import garage.json"])
+            with open(os.path.join(tmp, "next.md"), encoding="utf-8") as f:
+                self.assertTrue(f.read().startswith(blocks("docs/examples.md", ("markdown",))[0] + "\n"))
             failed = subprocess.run([sys.executable, "-m", "laneboard", "search", "label:dcos"], cwd=tmp, env=env,
                                     capture_output=True, text=True, encoding="utf-8", timeout=60)
             self.assertEqual((failed.returncode, failed.stdout, failed.stderr.strip()), (1, "", shown[10]))

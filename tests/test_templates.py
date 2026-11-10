@@ -769,6 +769,44 @@ class SavedTemplates(unittest.TestCase):
                          "work any more. There's no property called \"points\". Properties: Priority, Component. Change or "
                          "remove that view first.")
 
+    def test_a_view_that_would_not_work_on_a_new_board_stops_the_save(self):
+        renamed = [dict(p, name="Story points") if p["name"] == "Points" else p for p in self.before["properties"]]
+        board = self.store.update_board(self.board, {"properties": renamed})
+        self.assertEqual(Q.broken_views(board), [], "points still names the property by its id on this board")
+        with open(self.path, "rb") as f:
+            raw = f.read()
+        with self.assertRaises(StoreError) as caught:
+            self.store.save_template(self.board, "Renamed")
+        self.assertEqual(str(caught.exception), "That board can't be saved as a template: its saved view \"Big items\" "
+                         "wouldn't work on a board made from it. There's no property called \"points\". Properties: "
+                         "Story points, Priority, Component. Change that view first.")
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), raw)
+        view = next(v for v in board["views"] if v["name"] == "Big items")
+        self.store.update_board(self.board, {"views": [dict(v, query="story-points:>=8", sort="-story-points") if v is view else v
+                                                       for v in board["views"]]})
+        self.assertEqual(self.store.save_template(self.board, "Renamed")["board"]["views"][2]["query"], "story-points:>=8")
+
+    def test_saved_templates_that_would_make_no_working_board_are_found(self):
+        data = self.on_disk()
+        data["templates"] = [
+            plain_template(id="broken-view", name="Broken view", board={
+                "columns": [{"name": "To do"}], "properties": [{"name": "Hours", "type": "number"}],
+                "views": [{"name": "Big", "query": "points:>3", "sort": ""}]}),
+            plain_template(id="too-full", name="Too full", board={
+                "columns": [{"name": "To do", "limit": 1}], "settings": {"limitPolicy": "refuse"}},
+                cards=[{"title": "A"}, {"title": "B"}]),
+            plain_template(id="fine", name="Fine")]
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        found = [(t["id"], v and v["name"], str(e)) for t, v, e in self.store.template_troubles()]
+        self.assertEqual(found, [
+            ("broken-view", "Big", "There's no property called \"points\". Properties: Hours."),
+            ("too-full", None, "Board \"Too full\": That would put 2 cards in To do, over its limit of 1, and this board "
+                               "refuses cards once a column is full.")])
+        with self.assertRaises(StoreError):
+            self.store.create_board("", template="broken view")
+
     def test_renaming_and_describing(self):
         self.store.save_template(self.board, "Our setup")
         self.store.save_template(self.board, "Other")

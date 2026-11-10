@@ -12,9 +12,9 @@ import re
 
 from .. import store as _store
 from ..properties import TYPES, clean_definitions
-from ..schema import KEY_RE, LINK_RE, MAX_CHOICE_NAME, MAX_CHOICES, MAX_MULTI, MAX_NAME, MAX_TEXT, StoreError
-from .common import (MAX_CARD_LABELS, MAX_FIELD_TEXT, MAX_LABEL_NAME, MAX_LABELS, Fitter, Format, ImportResult, field,
-                     objects, plural, read_json)
+from ..schema import (KEY_RE, LINK_RE, MAX_CARD_LABELS, MAX_CHOICE_NAME, MAX_CHOICES, MAX_FIELD_TEXT, MAX_LABEL_NAME,
+                      MAX_LABELS, MAX_MULTI, MAX_NAME, MAX_TEXT, StoreError)
+from .common import Fitter, Format, ImportResult, field, objects, plural, read_json
 
 KEY_PREFIX = "GH"
 WHERE = "That issue list"

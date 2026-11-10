@@ -13,16 +13,20 @@ import urllib.request
 import webbrowser
 from datetime import datetime
 
-from . import __version__, samples, storage
+from . import __version__, formats, samples, storage
 from .properties import TYPE_NAMES, TYPES, find_property, property_text
 from .query import QueryError, broken_views, describe_error, run, search_boards
-from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
+from .schema import (CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, MAX_IMPORT_BYTES, NotFound, SCHEMA_VERSION, StaleRevision,
+                     StoreError, decode_text, load_bytes)
 from .server import BoardServer, encode_json
-from .store import Store, default_data_path, restore_backup, resolve_path
+from .stats import number_text, property_summary, summarize
+from .store import Store, default_data_path, outline, restore_backup, resolve_path
 from .templates import describe, get_template
 
 DEFAULT_PORT = 8642
 PROG = "laneboard"
+EXPORT_FORMATS = [name for name, f in formats.FORMATS.items() if f.export is not None]
+IMPORT_FORMATS = [name for name, f in formats.FORMATS.items() if f.import_ is not None]
 
 EXAMPLES = """\
 examples:
@@ -117,16 +121,16 @@ def find_named(items, ref, what, board):
     return match["id"]
 
 
-def read_json(name):
-    """Parse a JSON file, or standard input for `-`."""
+def read_file(name):
+    """The bytes of a file to import, or of standard input for `-`. Reading stops one byte past the most an
+    import can take, so a huge file is refused without being read to the end."""
     if name == "-":
-        return parse_json(sys.stdin.buffer.read(), "Standard input")
+        return sys.stdin.buffer.read(MAX_IMPORT_BYTES + 1)
     try:
         with open(name, "rb") as f:
-            raw = f.read()
+            return f.read(MAX_IMPORT_BYTES + 1)
     except OSError as e:
         raise StoreError(f"Can't read {name}: {storage.reason(e)}.") from e
-    return parse_json(raw, name)
 
 
 def write_json(payload, output, force):
@@ -136,11 +140,25 @@ def write_json(payload, output, force):
         json.dump(payload, sys.stdout, ensure_ascii=not utf8, indent=1)
         print()
         return
+    write_file(encode_json(payload, 1) + b"\n", output, force)
+
+
+def write_file(raw, output, force):
+    """Write an export to a file, or to the screen when `output` is None or -."""
+    if output in (None, "-"):
+        out = getattr(sys.stdout, "buffer", None)
+        if out is None:  # not a real console or pipe, as in a test
+            sys.stdout.write(raw.decode("utf-8"))
+            return
+        sys.stdout.flush()
+        out.write(raw)
+        out.flush()
+        return
     path = resolve_path(output)
     if os.path.exists(path) and not force:
         raise StoreError(f"{output} already exists. Use --force to replace it.")
     try:
-        storage.write_atomic(path, encode_json(payload, 1) + b"\n")
+        storage.write_atomic(path, raw)
     except OSError as e:
         raise StoreError(f"Can't write {output}: {storage.reason(e)}.") from e
     print(f"Wrote {output}.")
@@ -703,16 +721,86 @@ def cmd_settings(args):
 
 
 def cmd_import(args):
+    name, result = formats.import_file(read_file(args.file), args.format, None if args.file == "-" else args.file)
     store = Store(args.data, starter=False)  # the first thing in a new file is what's being added
-    for board in store.import_data(read_json(args.file)):
-        print(f"Imported {board['name']} with {count(len(board['cards']), 'card')} as {board['id']}.")
+    boards = store.import_boards(result.boards, preview=args.preview)
+    if args.preview:
+        print(f"Format: {formats.FORMATS[name].title}")
+        for board in boards:
+            shown = outline(board)
+            archived = f", {shown['archived']} of them archived" if shown["archived"] else ""
+            print(f"Would add {shown['name']}: {count(shown['cards'], 'card')}{archived}")
+            print("  Columns: " + ", ".join(f"{c['name']} {c['cards']}" for c in shown["columns"]))
+            if shown["labels"]:
+                print("  Labels: " + ", ".join(shown["labels"]))
+            if shown["properties"]:
+                print("  Properties: " + ", ".join(f"{p['name']} ({p['type']})" for p in shown["properties"]))
+    else:
+        for board in boards:
+            print(f"Imported {board['name']} with {count(len(board['cards']), 'card')} as {board['id']}.")
+    for warning in result.warnings:
+        print(f"Warning: {warning}")
+    if args.preview:
+        print("Nothing was added. Run it again without --preview to add it.")
 
 
 def cmd_export(args):
     if args.all == bool(args.board):
         raise StoreError("Name one board to export, or use --all.")
+    if args.all and args.format != "laneboard":
+        args.parser.error("--all writes the whole file as Laneboard JSON; export one board at a time for other formats")
     store = Store(args.data, starter=False)
-    write_json(store.all_data() if args.all else store.get_board(find_board(store, args.board)), args.output, args.force)
+    if args.all:
+        write_json(store.all_data(), args.output, args.force)
+        return
+    board = store.get_board(find_board(store, args.board))
+    if args.format == "laneboard":
+        write_json(board, args.output, args.force)  # as it always has been, so scripts that read it keep working
+    else:
+        write_file(formats.get_format(args.format, "export").export(board), args.output, args.force)
+
+
+def cmd_stats(args):
+    store = Store(args.data, starter=False)
+    board = store.get_board(find_board(store, args.board))
+    summary = summarize(board)
+    if args.json:
+        write_json(summary, None, False)
+        return
+    for line in stats_lines(board, summary):
+        print(line)
+
+
+def stats_lines(board, summary):
+    """A board's summary as text: totals, a table of columns, then groups, labels and properties."""
+    head = [count(summary["cards"], "card")]
+    head += [f"{summary[key]} {key}" for key in ("blocked", "archived") if summary[key]]
+    out = [f"{board['name']}: {', '.join(head)}"]
+    for name, key in (("Tasks", "tasks"), ("Checklist ticks", "checks")):
+        if summary[key]["total"]:
+            out.append(f"{name}: {summary[key]['done']} of {summary[key]['total']} done")
+    numbers = [p for p in board["properties"] if p["type"] == "number"]
+    table = [["Column", "Cards", "Limit"] + [p["name"] for p in numbers]]
+    for col in summary["columns"]:
+        table.append([col["name"], str(col["cards"]), str(col["limit"] or "")]
+                     + [number_text(col["sums"][p["id"]], p) for p in numbers])
+    widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
+    out.append("")
+    for row, col in zip(table, [None] + summary["columns"]):
+        line = "  ".join([row[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(row[1:], widths[1:])])
+        out.append(line.rstrip() + ("  over the limit" if col and col["over"] else ""))
+    for title, entries, rest, rest_name in ((board["groupLabel"], summary["groups"], summary["noGroup"], "none"),
+                                            ("Labels", summary["labels"], summary["noLabels"], "no labels")):
+        if entries:
+            shown = [f"{e['name']} {e['cards']}" for e in entries] + ([f"{rest_name} {rest}"] if rest else [])
+            out += ["", f"{title}: " + ", ".join(shown)]
+    if summary["properties"]:
+        props = {p["id"]: p for p in board["properties"]}
+        width = max(len(e["name"]) for e in summary["properties"])
+        out += ["", "Properties:"]
+        out += [f"  {e['name'].ljust(width)}  {property_summary(e, props[e['id']], summary['cards'])}"
+                for e in summary["properties"]]
+    return out
 
 
 def cmd_sample(args):
@@ -773,6 +861,15 @@ def cmd_check(args):
         print(f"Warning: on {board['name']}, {view_trouble(view, error)}")
     if broken:
         print("Those views are kept as they are. Change or remove them with laneboard views.")
+    troubles = store.template_troubles()
+    for template, view, error in troubles:
+        if view is None:
+            print(f"Warning: the template {template['name']} can't make a board: {error}")
+        else:
+            print(f"Warning: the template {template['name']} has a saved view \"{view['name']}\" that doesn't work: {error}")
+    if troubles:
+        print("No board can be made from those templates as they are. Fix them in the file, or delete them with "
+              "laneboard templates delete.")
     print("OK")
 
 
@@ -915,11 +1012,16 @@ def build_parser():
     p.add_argument("--card-face", metavar="A,B,C",
                    help="what cards show, in order: " + ", ".join(CARD_FACE_PARTS) + " and property names (\"\" for only the title)")
     p.add_argument("--default", metavar="NAME", help="the saved view the board opens with (by name or id), or none")
-    p = command("import", cmd_import, "add boards from a JSON file (one exported board, or a whole boards file)")
+    p = command("import", cmd_import, "add boards from a file: Laneboard JSON, Markdown, a Trello export or a GitHub issue list")
     p.add_argument("file", help="the file, or - for standard input")
-    p = command("export", cmd_export, "write a board as JSON")
+    p.add_argument("--format", type=str.lower, default="auto", choices=["auto"] + IMPORT_FORMATS,
+                   help="what the file is (default: auto, which tells from the file)")
+    p.add_argument("--preview", action="store_true", help="show what would be added, and add nothing")
+    p = command("export", cmd_export, "write a board as JSON, Markdown, a web page or plain text")
     p.add_argument("board", nargs="?", help="board id or name")
-    p.add_argument("--all", action="store_true", help="export the whole file instead of one board")
+    p.add_argument("--format", type=str.lower, default="laneboard", choices=EXPORT_FORMATS,
+                   help="what to write (default: laneboard, the JSON that import reads back)")
+    p.add_argument("--all", action="store_true", help="export the whole file instead of one board (Laneboard JSON only)")
     p.add_argument("-o", "--output", metavar="FILE", help="write to this file instead of the screen")
     p.add_argument("--force", action="store_true", help="replace the output file if it exists")
     p = command("sample", cmd_sample, "list the example boards, or add one")
@@ -927,6 +1029,9 @@ def build_parser():
     command("backups", cmd_backups, "list the copies of your boards file you can go back to")
     p = command("restore", cmd_restore, "go back to a backup (the current file is kept as a backup)")
     p.add_argument("name", help="a name from the backups command, or 'previous' for the last save")
+    p = command("stats", cmd_stats, "show a board's numbers: cards per column, group and label, and property totals")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("--json", action="store_true", help="print JSON")
     command("check", cmd_check, "check that the boards file can be read")
     return parser
 

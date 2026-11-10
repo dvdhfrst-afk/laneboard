@@ -256,6 +256,103 @@ Docs work                label:docs  sorted by -points
 Saving or deleting a template never changes a board. `laneboard templates delete "Release board" --yes`
 deletes it, keeping a backup of the file first.
 
+## Write a board as Markdown, and read it back
+
+```bash
+laneboard export "Next release" --format markdown -o next.md
+```
+
+`next.md` is a document you can read, with each card under its column. It starts like this:
+
+```markdown
+# Next release
+
+## Backlog
+
+## Ready
+
+### T-1 Write the upgrade notes
+
+- Labels: docs
+
+> What changes for people upgrading.
+
+#### Tasks
+
+- [x] List what changed
+- [ ] Ask for a review
+```
+
+It ends with a block of board settings, so that an import can make the same board again. See what an
+import would add before adding it:
+
+```bash
+laneboard import next.md --preview
+```
+
+```text
+Format: Markdown
+Would add Next release: 1 card
+  Columns: Backlog 0, Ready 1, In progress 0, Review 0, Done 0
+  Labels: docs
+Nothing was added. Run it again without --preview to add it.
+```
+
+```bash
+laneboard import next.md
+```
+
+That adds a second Next release with the same columns, labels, card keys and card text. `--format text`
+writes a shorter version to paste into a message, and `--format html` a page to read or print.
+
+## Import a Trello board
+
+In Trello, **Export as JSON** saves a board as one file. This one is made up and small; it goes in a
+file called `garage.json`:
+
+```json
+{
+  "name": "Garage clear-out",
+  "desc": "A made-up board to show a Trello import.",
+  "lists": [
+    { "id": "l1", "name": "To sort", "pos": 1 },
+    { "id": "l2", "name": "Sorted", "pos": 2 }
+  ],
+  "labels": [{ "id": "g1", "name": "Charity shop", "color": "green" }],
+  "cards": [
+    { "id": "c1", "name": "Box up the old books", "idList": "l1", "idLabels": ["g1"], "pos": 1,
+      "desc": "Ask first if anyone wants them.", "due": "2026-12-01T12:00:00.000Z" },
+    { "id": "c2", "name": "Sell the bike", "idList": "l2", "idMembers": ["m1"], "pos": 2 }
+  ],
+  "checklists": [
+    { "id": "k1", "idCard": "c1", "name": "Boxes",
+      "checkItems": [{ "name": "Novels", "state": "complete", "pos": 1 }, { "name": "Cookbooks", "state": "incomplete", "pos": 2 }] }
+  ]
+}
+```
+
+```bash
+laneboard import garage.json --preview
+```
+
+```text
+Format: Trello board export
+Would add Garage clear-out: 2 cards
+  Columns: To sort 1, Sorted 1
+  Labels: Charity shop
+Warning: Left out the due dates on 1 card.
+Warning: Left out members on 1 card, which Laneboard doesn't keep.
+Nothing was added. Run it again without --preview to add it.
+```
+
+```bash
+laneboard import garage.json
+```
+
+The lists become columns and the cards keep their labels. The description becomes the card's notes, and
+the checklist its tasks, with Novels ticked. Laneboard has no due dates or members, so it says it left
+them out.
+
 ## Use it from a script
 
 `--json` gives you the data, and the exit code says whether it worked:

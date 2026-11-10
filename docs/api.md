@@ -21,7 +21,8 @@ header the change is applied regardless, so a script that wants to be careful sh
 | `GET /api/boards/<id>` | A board with its cards | `{board}` |
 | `PATCH /api/boards/<id>` | Change `name`, `description`, `prefix`, `groupLabel`, `template`, `columns`, `groups`, `checklists`, `labels`, `properties`, `views`, `settings` | `{board}` |
 | `DELETE /api/boards/<id>` | Delete a board, keeping a backup first | `{deleted}` |
-| `GET /api/boards/<id>/export` | Download the board | The board |
+| `GET /api/boards/<id>/export?format=laneboard` | Download the board, in any format that exports | The file |
+| `GET /api/boards/<id>/summary` | The board's numbers | `{summary}` |
 | `GET /api/boards/<id>/search?q=&sort=&archived=0` | Search one board | `{keys, total, matched}` |
 | `POST /api/boards/<id>/cards` | Add a card | `201 {board, key}` |
 | `PATCH /api/boards/<id>/cards/<key>` | Change a card. Only the fields you send change | `{board}` |
@@ -31,8 +32,9 @@ header the change is applied regardless, so a script that wants to be careful sh
 | `DELETE /api/boards/<id>/cards/<key>/tasks/<task id>` | Remove a task | `{board}` |
 | `POST /api/boards/<id>/cards/<key>/transfer` | Move a card to another board: `{board, column, targetRev}` | `{board, target, key, dropped}` |
 | `GET /api/search?q=&sort=&archived=0` | Search every board | `{results: [{board, name, keys, total}]}` |
-| `GET /api/export` | Download the whole file | The file |
-| `POST /api/import` | Add one board, or every board in a whole file. All or nothing | `201 {boards: [{id, name, cards}]}` |
+| `GET /api/export` | Download the whole file, as Laneboard JSON | The file |
+| `GET /api/formats` | List the formats | `{formats: [{name, title, extension, mime, export, import}]}` |
+| `POST /api/import?format=auto&preview=0` | Add the boards in a file. All or nothing | `201 {boards: [{id, name, cards}], format, warnings}` |
 | `GET /api/samples` | List the example boards | `{samples: [{name, title, description, cards}]}` |
 | `POST /api/samples/<name>` | Add an example board | `201 {board}` |
 | `GET /api/templates` | List the templates, built-in ones first | `{templates: [{id, name, description, builtIn, columns, cards}]}` |
@@ -103,6 +105,53 @@ changed or removed.
 Saving, changing or deleting a template never changes a board or its `rev`. Changing or deleting a built-in
 template answers `409`.
 
+## Import and export
+
+`GET /api/formats` lists the formats, each with its `name`, `title`, file `extension`, the `mime` type an
+export is sent as, and whether it can `export` and `import`. The README's
+[Import and export](../README.md#import-and-export) section says what each one keeps and leaves out.
+
+`GET /api/boards/<id>/export` downloads a board. `format` is a format's name and defaults to `laneboard`,
+which sends the same bytes as it always has. Every export is sent as an attachment named after the board
+(letters, digits and hyphens, then the format's extension), so a browser saves it rather than showing it,
+and with a content security policy of `sandbox` in case anything opens it anyway. `GET /api/export`
+downloads the whole file, and only as Laneboard JSON.
+
+`POST /api/import` adds the boards in a file. The body is the file itself, as it is, sent as
+`application/json`, `text/markdown` or `application/octet-stream`; other types are refused with `415`, so a
+form on another site can't send one. The limit is 64 MB. `format` is a format's name, or `auto` (the
+default) to tell from the file; `filename`, the file's name, helps `auto` tell. The boards are checked
+exactly as a Laneboard JSON import is, and either all of them are added or none. The answer adds `format`,
+the format the file was read as, and `warnings`, sentences saying what didn't fit or was left out:
+
+```json
+{"boards": [{"id": "b-1a2b3c4d", "name": "Garage clear-out", "cards": 2}], "format": "trello",
+ "warnings": ["Left out the due dates on 1 card.", "Left out members on 1 card, which Laneboard doesn't keep."]}
+```
+
+With `preview=1` the file is read and checked the same way, but nothing is saved, and the answer is `200`
+and describes what would be added. In each board, `columns` counts the cards on the board in each column,
+`cards` counts every card, and `archived` counts the archived ones:
+
+```json
+{"format": "trello", "warnings": ["Left out the due dates on 1 card.", "Left out members on 1 card, which Laneboard doesn't keep."],
+ "boards": [{"name": "Garage clear-out", "columns": [{"name": "To sort", "cards": 1}, {"name": "Sorted", "cards": 1}],
+  "cards": 2, "archived": 0, "labels": ["Charity shop"], "properties": []}]}
+```
+
+## Summary
+
+`GET /api/boards/<id>/summary` answers `{summary}` with a board's numbers. Archived cards count only in
+`archived`; every other number is about the cards on the board.
+
+| Key | Holds |
+|---|---|
+| `cards`, `blocked`, `archived` | How many cards there are, how many are blocked, and how many are archived |
+| `columns` | `[{id, name, cards, limit, over, sums}]` in board order. `over` is true when a column holds more than its limit, and `sums` totals each number property: `{property id: total}` |
+| `groups`, `labels` | `[{id, name, color, cards}]`, with `noGroup` and `noLabels` counting the cards with none |
+| `properties` | One entry per property, `{id, name, type, cards}`, where `cards` counts the cards with a value (a ticked box, for checkboxes). Numbers add `total`, `average`, `min`, `max`, `unit` and `decimals`; ratings add `average` and `outOf`; choices add `options`, `[{id, name, color, cards}]` |
+| `tasks`, `checks` | `{done, total}` for the cards' tasks and checklist ticks |
+
 ## Moving a card to another board
 
 `POST /api/boards/<id>/cards/<key>/transfer` saves both boards in one step. `board` is the id of the board
@@ -135,7 +184,7 @@ to point at the spot:
 | `409` | It conflicts with the rules, like removing a column that holds cards, going over a limit, adding a card to a full column on a board that refuses them, or changing a built-in template |
 | `412` | The board changed since the `rev` you sent |
 | `413` | The body is too large: 4 MB, or 64 MB for an import |
-| `415` | The body wasn't sent as JSON |
+| `415` | The body wasn't sent as JSON, or a file to import wasn't sent as one of the types it takes |
 | `503` | The boards file can't be read or saved right now. The message says why |
 
 ## Example
