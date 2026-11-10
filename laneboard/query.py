@@ -418,8 +418,8 @@ class _Compiler:
         return (lambda v: v.card.get("column") == cid), 1
 
     def q_group(self, tok, positive):
-        if not self.groups:
-            raise QueryError("This board has no groups.", tok.value_pos)
+        if not self.groups:  # at the qualifier, not the value: no group name could have worked
+            raise QueryError("This board has no groups.", tok.pos)
         options = [(g.get("id"), g.get("name")) for g in self.groups]
         gid = _pick(options, tok.value, tok.value_pos, f'There\'s no group called "{_shown(tok.value.strip())}". '
                     f'Groups: {", ".join(o[1] for o in options)}.', "group")
@@ -427,7 +427,7 @@ class _Compiler:
 
     def q_label(self, tok, positive):
         if not self.labels:
-            raise QueryError("This board has no labels.", tok.value_pos)
+            raise QueryError("This board has no labels.", tok.pos)
         options = [(label.get("id"), label.get("name")) for label in self.labels]
         lid = _pick(options, tok.value, tok.value_pos, f'There\'s no label called "{_shown(tok.value.strip())}". '
                     f'Labels: {", ".join(o[1] for o in options)}.', "label")

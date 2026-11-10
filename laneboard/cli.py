@@ -15,7 +15,7 @@ from datetime import datetime
 
 from . import __version__, samples, storage
 from .properties import TYPE_NAMES, TYPES, find_property, property_text
-from .query import QueryError, broken_views, describe_error
+from .query import QueryError, broken_views, describe_error, run, search_boards
 from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
 from .server import BoardServer, encode_json
 from .store import Store, default_data_path, restore_backup, resolve_path
@@ -169,22 +169,69 @@ def card_line(card, columns, labels=None):
     return f"{card['key']:<12} {columns.get(card['column'], card['column']):<14} {card['title']}{shown}{blocked}"
 
 
+def searched(board, query, sort, archived=False, view=None):
+    """Search one board: (keys, cards considered). A search that can't be read is a plain error, with the
+    text it is about and a pointer. `view` is the saved view the search (and maybe the sort) came from."""
+    try:
+        return run(board, query, sort, archived)
+    except QueryError as e:
+        if view is not None and (e.part == "query" or sort == view["sort"]):
+            trouble = view_trouble(view, e)
+            e = QueryError(trouble[:1].upper() + trouble[1:], e.position, e.part)
+        raise pointed(e, query, sort) from None
+
+
+def print_cards(board, cards, indent=""):
+    columns = {c["id"]: c["name"] for c in board["columns"]}
+    labels = {lab["id"]: lab["name"] for lab in board["labels"]}
+    for card in cards:
+        print(indent + card_line(card, columns, labels))
+
+
 def cmd_cards(args):
     store = Store(args.data)
     board = store.get_board(find_board(store, args.board))
     column = find_named(board["columns"], args.column, "column", board) if args.column else None
-    order = {c["id"]: i for i, c in enumerate(board["columns"])}
-    cards = [c for c in board["cards"] if bool(c["archived"]) == args.archived and (column is None or c["column"] == column)]
-    cards.sort(key=lambda c: (order.get(c["column"], 0), c["rank"]))
+    query, sort, view = args.query or "", args.sort or "", None
+    if args.view is not None:
+        vid = find_named(board["views"], args.view, "saved view", board)
+        view = next(v for v in board["views"] if v["id"] == vid)
+        query, sort = view["query"], view["sort"] if args.sort is None else args.sort
+    keys, _ = searched(board, query, sort, archived=args.archived, view=view)
+    by_key = {c["key"]: c for c in board["cards"]}
+    # --archived lists archived cards instead; without it a search can still ask for them, with is:archived
+    cards = [by_key[k] for k in keys if (not args.archived or by_key[k]["archived"]) and (column is None or by_key[k]["column"] == column)]
     if args.json:
         write_json(cards, None, False)
         return
-    columns = {c["id"]: c["name"] for c in board["columns"]}
-    labels = {lab["id"]: lab["name"] for lab in board["labels"]}
-    for card in cards:
-        print(card_line(card, columns, labels))
+    print_cards(board, cards)
     if not cards:
         print("No cards to show.")
+
+
+def cmd_search(args):
+    store = Store(args.data, starter=False)  # looking doesn't create a file
+    sort = args.sort or ""
+    if args.board:
+        board = store.get_board(find_board(store, args.board))
+        keys, considered = searched(board, args.query, sort)
+        results = [(board, keys, considered)] if keys else []
+    else:
+        try:
+            results = search_boards(store.all_data()["boards"], args.query, sort)
+        except QueryError as e:
+            raise pointed(e, args.query, sort) from None
+    found = [(board, [next(c for c in board["cards"] if c["key"] == k) for k in keys], considered)
+             for board, keys, considered in results]
+    if args.json:
+        write_json([{"board": board["id"], "name": board["name"], "total": considered, "cards": cards}
+                    for board, cards, considered in found], None, False)
+        return
+    for board, cards, considered in found:
+        print(f"{board['name']} ({len(cards)} of {count(considered, 'card')})")
+        print_cards(board, cards, "  ")
+    if not found:
+        print("No cards match.")
 
 
 def cmd_add(args):
@@ -724,6 +771,15 @@ def build_parser():
     p.add_argument("board", help="board id or name")
     p.add_argument("--column", help="only this column (id or name)")
     p.add_argument("--archived", action="store_true", help="show archived cards instead")
+    find = p.add_mutually_exclusive_group()
+    find.add_argument("--query", metavar="Q", help="only cards that match this search, as typed in the search box")
+    find.add_argument("--view", metavar="NAME", help="only cards that match this saved view, in its order")
+    p.add_argument("--sort", metavar="S", help="the order within each column, like title or -points (default: as on the board)")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = command("search", cmd_search, "find cards on every board, or on one")
+    p.add_argument("query", help="what to look for, as typed in the search box")
+    p.add_argument("--board", help="only this board (id or name)")
+    p.add_argument("--sort", metavar="S", help="the order within each column, like title or -points")
     p.add_argument("--json", action="store_true", help="print JSON")
     p = command("add", cmd_add, "add a card and print its key")
     p.add_argument("board", help="board id or name")

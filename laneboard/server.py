@@ -14,10 +14,10 @@ import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from . import __version__, samples, storage
-from .query import QueryError
+from .query import QueryError, run, search_boards
 from .schema import SCHEMA_VERSION, slug
 from .store import Store, StoreError
 
@@ -25,6 +25,7 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY = 4_000_000
 MAX_IMPORT = 64_000_000
 MAX_DRAIN = 2 * MAX_IMPORT
+MAX_PARAMS = 20  # in a query string
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
 CONTENT_TYPES = {  # not mimetypes: on Windows it reads the registry, which can call .js text/plain, and the page dies
     ".html": "text/html; charset=utf-8",
@@ -46,12 +47,14 @@ ROUTES = [
     ("POST", re.compile(r"/api/boards"), "create_board"),
     ("GET", re.compile(r"/api/export"), "export_all"),
     ("POST", re.compile(r"/api/import"), "import_file"),
+    ("GET", re.compile(r"/api/search"), "search_all"),
     ("GET", re.compile(r"/api/samples"), "list_samples"),
     ("POST", re.compile(r"/api/samples/(?P<name>[a-z0-9-]+)"), "add_sample"),
     ("GET", re.compile(rf"/api/boards/{BOARD}"), "get_board"),
     ("PATCH", re.compile(rf"/api/boards/{BOARD}"), "update_board"),
     ("DELETE", re.compile(rf"/api/boards/{BOARD}"), "delete_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/export"), "export_board"),
+    ("GET", re.compile(rf"/api/boards/{BOARD}/search"), "search_board"),
     ("POST", re.compile(rf"/api/boards/{BOARD}/cards"), "create_card"),
     ("PATCH", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "update_card"),
     ("DELETE", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "delete_card"),
@@ -118,7 +121,8 @@ class Handler(BaseHTTPRequestHandler):
         self._body_read = False
         try:
             self._check_host()
-            path = urlsplit(self.path).path
+            parts = urlsplit(self.path)
+            path, self._query = parts.path, parts.query
             if path.startswith("/api/"):
                 self._check_fetch_site()
                 if method not in ("GET", "HEAD"):
@@ -183,6 +187,25 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _no_constant(name):
         raise ValueError(name)
+
+    def _param(self, name, default=""):
+        """One value from the query string, decoded. A name given twice is refused rather than guessed at."""
+        try:
+            values = parse_qs(self._query, keep_blank_values=True, max_num_fields=MAX_PARAMS).get(name)
+        except ValueError:
+            raise HttpError(400, f"That address has too many parameters (the limit is {MAX_PARAMS}).")
+        if not values:
+            return default
+        if len(values) > 1:
+            raise HttpError(400, f"Give {name} only once.")
+        return values[0]
+
+    def _search_params(self):
+        """q, sort and archived, as the search routes take them."""
+        archived = self._param("archived", "0").strip().lower()
+        if archived not in ("0", "1", "false", "true", ""):
+            raise HttpError(400, "archived must be 0 (leave archived cards out) or 1 (include them).")
+        return self._param("q"), self._param("sort"), archived in ("1", "true")
 
     def _rev(self):
         value = self.headers.get("If-Match")
@@ -282,6 +305,17 @@ class Handler(BaseHTTPRequestHandler):
     def api_import_file(self):
         boards = self.store.import_data(self._body(limit=MAX_IMPORT))
         return 201, {"boards": [{"id": b["id"], "name": b["name"], "cards": len(b["cards"])} for b in boards]}
+
+    def api_search_board(self, board):
+        text, sort, archived = self._search_params()
+        keys, considered = run(self.store.get_board(board), text, sort, archived)
+        return 200, {"keys": keys, "total": considered, "matched": len(keys)}
+
+    def api_search_all(self):
+        text, sort, archived = self._search_params()
+        results = search_boards(self.store.all_data()["boards"], text, sort, archived)
+        return 200, {"results": [{"board": b["id"], "name": b["name"], "keys": keys, "total": considered}
+                                 for b, keys, considered in results]}
 
     def api_list_samples(self):
         return 200, {"samples": samples.list_samples()}

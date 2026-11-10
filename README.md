@@ -99,6 +99,46 @@ Columns show the first 300 cards with a button for more, so a very long column s
 
 Dragging doesn't work on touch screens. Open the card and use its column list and arrow buttons.
 
+## Search
+
+Type words to find the cards that have all of them, anywhere on the card: its key, title, summary,
+"blocked by" line, notes, fields, sections, tasks, group, labels and property values. Capitals and
+accents don't matter. Archived cards are left out unless you ask for them with `is:archived`.
+
+| You type | It finds |
+|---|---|
+| `login page` | Cards with both words |
+| `"release notes"` | The words together, as typed |
+| `bug OR crash` | Cards with either word |
+| `-wontfix` or `NOT wontfix` | Cards without the word |
+| `(bug OR crash) column:review` | Parentheses group words; this finds either word in the Review column |
+| `column:review` or `col:review`, `group:web`, `label:bug` | Cards in that column, group or label, by its name or the start of it |
+| `key:WEB-3`, `title:login`, `notes:token` | Words in just that part of a card |
+| `is:blocked`, `is:archived`, `is:over-limit`, `is:done` | Blocked cards, archived cards, cards in a column over its limit, cards in the last column |
+| `has:notes`, `has:summary`, `has:labels`, `has:tasks`, `has:points` | Cards with something there, or with a value for that property |
+| `tasks:open`, `tasks:done`, `progress:>=50` | Cards with tasks left to do, with every task done, or at least half ticked off |
+| `points:3`, `points:>=3`, `points:2..5` | A number or rating property compared with a value, or between two |
+| `priority:high`, `platform:ios`, `reviewed:yes`, `link:example.com` | A choice, one of several choices, a checkbox, or words in a link |
+
+A property is named the way the board names it; capitals, spaces and hyphens don't matter, so
+`story-points:3` finds a property called Story points. A search that names something the board
+doesn't have says so and lists what it does have.
+
+To change the order of the cards in each column, add a sort: `sort:title`, `sort:-points` (a minus
+sorts the other way), or several, like `sort:-priority,title`. You can sort by `title`, `key`,
+`created`, `updated`, `group`, `progress`, `rank` (the order on the board, which is the default) or
+any property. Cards with no value go last either way.
+
+The command line takes the same searches, and a saved view keeps one under a name:
+
+```bash
+laneboard search "upgrade OR session"
+```
+
+```bash
+laneboard cards "Software release" --query "group:web OR is:blocked" --sort title
+```
+
 ## Where your boards are kept
 
 All boards live in one file, outside this folder:
@@ -149,7 +189,8 @@ Every command takes `--help`. A board can be named by its name or id.
 |---|---|
 | `laneboard` or `laneboard serve` | Run the board. `--open`, `--port PORT`, `--verbose` |
 | `laneboard boards` | List boards. `--json` |
-| `laneboard cards BOARD` | List cards. `--column NAME`, `--archived`, `--json` |
+| `laneboard cards BOARD` | List cards. `--column NAME`, `--archived`, `--query Q` or `--view NAME`, `--sort S`, `--json` |
+| `laneboard search QUERY` | Find cards on every board, board by board. `--board B`, `--sort S`, `--json` |
 | `laneboard add BOARD TITLE` | Add a card and print its key. `--column`, `--group`, `--summary` |
 | `laneboard move BOARD KEY COLUMN` | Move a card to the bottom of a column |
 | `laneboard archive BOARD KEY` | Archive a card. `--restore` brings it back |
