@@ -39,7 +39,25 @@ export const revs = new Map();
 export let latest = null;
 
 export function setLatest(board) {
-  latest = board;
+  latest = withDefaults(board);
+}
+
+// A board sent by an older Laneboard, while the bar asks for a restart, lacks what file format 3 added. Filling
+// that in lets the page still show the board instead of stopping on the first missing list.
+const CARD_FACE = ["group", "labels", "field", "progress", "blocked"];
+function withDefaults(board) {
+  if (!board || board.settings) return board;
+  board.settings = { cardFace: [...CARD_FACE], limitPolicy: "warn", defaultView: null };
+  board.labels ??= [];
+  board.properties ??= [];
+  board.views ??= [];
+  board.archived ??= null;
+  for (const card of board.cards || []) {
+    card.labels ??= [];
+    card.properties ??= {};
+    card.tasks ??= [];
+  }
+  return board;
 }
 
 // Notes that couldn't be saved after their card was closed. Nothing typed gets thrown away.
@@ -63,6 +81,7 @@ export const groupOf = (card) => index.groups.get(card.group) || null;
 export const labelsOf = (ids) => ids.map((id) => index.labels.get(id)).filter(Boolean);
 
 export function setBoard(board) {
+  board = withDefaults(board);
   state.board = board;
   latest = board;
   if (board) revs.set(board.id, board.rev);
