@@ -1,10 +1,10 @@
 // Drawing the open board: the header, the columns and the cards on them, the groups table, and what an empty page offers.
 
-import { activeCards, cardsIn, groupOf, index, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
+import { activeCards, cardsIn, filterParams, groupOf, index, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
 import { countBy, plural } from "./util.js";
 import { $, groupLink, groupTag, h, rich } from "./dom.js";
 import { renderMenu } from "./menu.js";
-import { filtering, matches, queryWords, renderFilters } from "./search.js";
+import { drawPlan, matchCount, renderTools, searchSoon } from "./search.js";
 import { openCard, progress } from "./card.js";
 import { openCardForm } from "./cardform.js";
 import { openNewBoard, startingPoints } from "./settings.js";
@@ -41,9 +41,10 @@ export function render() {
     return;
   }
   renderWelcome();
-  renderFilters();
+  renderTools();
   renderColumns();
   renderGroups();
+  searchSoon();
 }
 
 export function renderPicker() {
@@ -64,7 +65,7 @@ function renderEmpty() {
   main.replaceChildren(h("div", { class: "start" },
     h("p", { text: "There are no boards yet." }),
     h("div", { class: "start-actions" },
-      h("button", { type: "button", class: "primary", text: "Create a board", onclick: openNewBoard }),
+      h("button", { type: "button", class: "primary", text: "Create a board", onclick: () => openNewBoard() }),
       h("button", { type: "button", text: "Import a file", onclick: chooseImportFile })),
     startingPoints()));
 }
@@ -105,25 +106,24 @@ export function renderColumns() {
     state.wantFocus = true;
   }
   const scroll = new Map([...main.querySelectorAll(".col")].map((c) => [c.dataset.col, c.scrollTop]));
-  const words = queryWords();
-  const narrowed = filtering(words);
+  const plan = drawPlan();
+  const narrowed = !!plan;
+  drawn = plan ? new Set([...plan.columns.values()].flat().map((c) => c.key)) : null;
+  const params = filterParams();
+  const href = (key) => `#${b.id}/${key}${params ? "?" + params : ""}`;
   const collapsed = collapsedColumns();
   const face = faceParts();
   const refuse = b.settings.limitPolicy === "refuse";
   main.style.gridTemplateColumns = b.columns.map((c) => (collapsed.has(c.id) ? "minmax(130px, 150px)" : "minmax(230px, 1fr)")).join(" ");
-  let matched = 0;
-  let total = 0;
   const columns = b.columns.map((col) => {
     const all = cardsIn(col.id);
-    const shown = narrowed ? all.filter((c) => matches(c, words)) : all;
-    total += all.length;
-    matched += shown.length;
+    const shown = plan ? plan.columns.get(col.id) : all;
     const over = col.limit && all.length > col.limit;
     const full = refuse && col.limit && all.length >= col.limit;
     const closed = collapsed.has(col.id);
     const note = state.columnNote?.column === col.id ? state.columnNote.message : "";
     const limit = state.shown.get(col.id) || COLUMN_PAGE;
-    const drawn = shown.length > limit ? shown.slice(0, limit) : shown;
+    const page = shown.length > limit ? shown.slice(0, limit) : shown;
     return h("section", { class: closed ? "col collapsed" : "col", "data-col": col.id, "aria-label": col.name },
       h("div", { class: "col-head" },
         h("button", { type: "button", class: "collapse", "aria-expanded": String(!closed), title: `${closed ? "Show" : "Hide"} the cards in ${col.name}`,
@@ -136,10 +136,10 @@ export function renderColumns() {
           h("button", { type: "button", title: `Add a card to ${col.name}`, "aria-label": `Add a card to ${col.name}`,
             text: "+", onclick: () => openCardForm(null, { column: col.id }) }))),
       note && h("div", { class: "col-note", role: "alert", text: note }),
-      !closed && (drawn.length ? drawn.map((card) => cardEl(card, face))
+      !closed && (page.length ? page.map((card) => cardEl(card, face, href(card.key)))
         : h("div", { class: "empty", text: narrowed && all.length ? "No matching cards" : "No cards" })),
-      !closed && shown.length > drawn.length && h("button", {
-        type: "button", class: "more", text: `Show ${Math.min(COLUMN_PAGE, shown.length - drawn.length)} more of ${shown.length - drawn.length}`,
+      !closed && shown.length > page.length && h("button", {
+        type: "button", class: "more", text: `Show ${Math.min(COLUMN_PAGE, shown.length - page.length)} more of ${shown.length - page.length}`,
         onclick: () => { state.shown.set(col.id, limit + COLUMN_PAGE); renderColumns(); },
       }));
   });
@@ -148,9 +148,13 @@ export function renderColumns() {
     if (scroll.get(el.dataset.col)) el.scrollTop = scroll.get(el.dataset.col);
   }
   settleFocus(main);
-  const count = $("#search-count");
-  count.textContent = narrowed ? `${matched} of ${plural(total, "card")}` : "";
+  $("#search-count").textContent = matchCount(plan);
 }
+
+// The keys of the cards the last draw showed (whether or not a "show more" button hides some), or null for all of
+// them. Moving a card up or down steps over the cards in between that aren't showing.
+let drawn = null;
+export const isDrawn = (key) => !drawn || drawn.has(key);
 
 // Only one card is a tab stop; arrow keys go between cards. Otherwise a big board takes a thousand Tab presses to cross.
 function settleFocus(main) {
@@ -191,11 +195,12 @@ function faceParts() {
   }).filter(Boolean);
 }
 
-// A card as it shows in a column.
-function cardEl(card, face) {
+// A card as it shows in a column. An archived card shows only when a search asks for archived cards, and stays put.
+function cardEl(card, face, href) {
   const meta = face.map((part) => part(card)).filter(Boolean);
-  return h("a", {
-    class: "card", href: `#${state.board.id}/${card.key}`, draggable: true, "data-key": card.key, tabIndex: -1,
+  if (card.archived) meta.unshift(h("span", { class: "flag archived-flag", text: "Archived" }));
+  const el = h("a", {
+    class: card.archived ? "card archived" : "card", href, "data-key": card.key, tabIndex: -1,
     onclick: (e) => {
       if (e.button || e.ctrlKey || e.metaKey || e.shiftKey) return;  // let the browser open a new tab
       e.preventDefault();
@@ -205,6 +210,8 @@ function cardEl(card, face) {
   h("span", { class: "key", text: card.key }),
   h("span", { class: "title", text: card.title }),
   meta.length > 0 && h("span", { class: "meta" }, meta));
+  el.draggable = !card.archived;
+  return el;
 }
 
 function renderGroups() {

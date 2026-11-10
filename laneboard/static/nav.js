@@ -1,10 +1,12 @@
-// Opening boards and cards: following the address (#<board id> or #<board id>/<card key>) and going to a board.
+// Opening boards and cards: following the address (#<board id> or #<board id>/<card key>, then the search and sort,
+// see parseHash) and going to a board. A board opening with no search in the address uses its default view.
 
 import { parseHash, recall, resetView, setBoard, setHash, sheet, state } from "./state.js";
 import { askDiscard, closeSheet, toast } from "./dom.js";
 import { loadBoard, loadBoards } from "./api.js";
 import { render } from "./board.js";
 import { openCard } from "./card.js";
+import { useDefaultView, useFilter } from "./views.js";
 
 export async function route() {
   if (sheet.dirty) {  // arrived here by the back button or a typed address; don't drop what's being typed
@@ -26,16 +28,21 @@ export async function route() {
     render();
     return;
   }
+  let opened = false;
   try {
     if (!state.board || state.board.id !== id) {
       closeSheet(true);
       resetView();
       await loadBoard(id);
+      opened = true;
     }
   } catch (e) {
     toast(e.message, { error: true });
     return;
   }
+  const filter = want.board === id ? want.filter : null;
+  if (filter) useFilter(filter);
+  else if (opened) useDefaultView();
   const key = want.board === id ? want.key : "";
   setHash(id, key);
   render();
@@ -49,6 +56,7 @@ export async function goToBoard(id) {
   await loadBoards();
   resetView();
   await loadBoard(id);
+  useDefaultView();
   setHash(id);
   render();
 }

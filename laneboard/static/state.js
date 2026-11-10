@@ -9,10 +9,11 @@ const LAST_BOARD = "laneboard:last-board";
 export const state = {
   boards: [],          // [{id, name, cards, archived, rev}]
   board: null,         // the open board, as the server last sent it
-  query: "",
-  groups: new Set(),   // group filter; empty shows every card, "" stands for cards with no group
-  labels: new Set(),   // label filter; empty shows every card, otherwise cards with any of these labels
-  blockedOnly: false,
+  query: "",           // the search box, sent to the server as typed; the server reads the search language
+  sort: "",            // the sort picker's sort string, like "-points"; empty is the board's own order
+  viewId: null,        // the saved view last picked, so it can be updated, or shown as changed
+  found: null,         // the server's last good answer: {board, rev, query, sort, keys: Map key -> place, matched, total}
+  searchError: null,   // why the server couldn't read the search: {board, rev, query, sort, message, position, part}
   columnNote: null,    // {column, message}: why a card couldn't go into that column, shown at the top of it
   drag: null,          // key of the card being dragged
   shown: new Map(),    // column id -> how many cards to draw
@@ -46,7 +47,7 @@ export const drafts = new Map();
 // What the side sheet is showing. `dirty` guards unsaved form edits; `onClose` flushes card notes.
 export const sheet = { mode: null, key: null, dirty: false, onClose: null, unsaved: null, retry: null, sync: null };
 
-const byRank = (a, b) => a.rank - b.rank || a.key.localeCompare(b.key, undefined, { numeric: true });
+export const byRank = (a, b) => a.rank - b.rank || a.key.localeCompare(b.key, undefined, { numeric: true });
 export const cardBy = (key) => index.byKey.get(key);
 export const cardsIn = (column) => index.byColumn.get(column) || [];
 export const activeCards = () => state.board.cards.filter((c) => !c.archived);
@@ -85,9 +86,7 @@ export function syncListEntry() {
 
 // How the last board was being looked at, forgotten when another board opens.
 export function resetView() {
-  state.groups.clear();
-  state.labels.clear();
-  state.blockedOnly = false;
+  Object.assign(state, { query: "", sort: "", viewId: null, found: null, searchError: null });
   state.columnNote = null;
   state.shown.clear();
   state.focusKey = null;
@@ -107,14 +106,37 @@ export function store(key, value) {
 export const remember = (id) => store(LAST_BOARD, id);
 export const recall = () => stored(LAST_BOARD, null);
 
-// The address: #<board id> or #<board id>/<card key>.
+// The address: #<board id> or #<board id>/<card key>, then what the board is filtered and sorted by:
+// ?q=<search>&sort=<sort>&view=<saved view id>. `filter` is null when the address says nothing about it.
 export function parseHash() {
-  let raw = location.hash.slice(1);
-  try { raw = decodeURIComponent(raw); } catch { raw = ""; }
-  const [board = "", key = ""] = raw.split("/");
-  return { board, key };
+  const raw = location.hash.slice(1);
+  const at = raw.indexOf("?");
+  let path = at < 0 ? raw : raw.slice(0, at);
+  try { path = decodeURIComponent(path); } catch { path = ""; }
+  const [board = "", key = ""] = path.split("/");
+  let filter = null;
+  if (at >= 0) {
+    const params = new URLSearchParams(raw.slice(at + 1));
+    filter = { query: params.get("q") ?? "", sort: params.get("sort") ?? "", view: params.get("view") || null };
+  }
+  return { board, key, filter };
+}
+
+// The search and sort as the address carries them. A board that opens with a saved view says so when it shows
+// everything, so a reload doesn't bring the view back.
+export function filterParams({ query, sort, viewId } = state) {
+  const params = new URLSearchParams();
+  if (viewId) params.set("view", viewId);
+  if (query) params.set("q", query);
+  if (sort) params.set("sort", sort);
+  if (!query && !sort && !viewId && state.board?.settings.defaultView) params.set("q", "");
+  return params.toString();
 }
 
 export function setHash(id, key) {
-  history.replaceState(null, "", `#${id}${key ? "/" + key : ""}`);
+  const params = filterParams();
+  history.replaceState(null, "", `#${id}${key ? "/" + key : ""}${params ? "?" + params : ""}`);
 }
+
+// Keep the address up to date with the search, leaving the open card in it.
+export const noteAddress = () => setHash(state.board.id, parseHash().key);

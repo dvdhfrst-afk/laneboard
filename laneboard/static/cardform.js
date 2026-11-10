@@ -7,9 +7,12 @@ import { send } from "./api.js";
 import { openCard } from "./card.js";
 import { labelsField } from "./labels.js";
 import { editor, propField, sameValue } from "./properties.js";
+import { chipPicks } from "./search.js";
 
-function onlyFilteredGroup() {
-  return state.groups.size === 1 ? [...state.groups][0] || null : null;
+// A new card starts in the group the search is narrowed to, and with the label it's narrowed to, when there's one.
+function startingPicks() {
+  const picks = chipPicks();
+  return { group: picks.group.size === 1 ? [...picks.group][0] || null : null, labels: picks.label.size === 1 ? [...picks.label] : [] };
 }
 
 // The part of a card the edit form shows, for telling whether someone else has changed it.
@@ -20,9 +23,8 @@ export function openCardForm(key, defaults = {}) {
   const b = state.board;
   const card = key ? cardBy(key) : null;
   let startedFrom = formPart(card);
-  const v = card || { title: "", group: onlyFilteredGroup(), column: defaults.column || b.columns[0].id,
-    summary: "", blocked: "", fields: [], sections: b.template.map((label) => ({ label, body: "" })),
-    labels: state.labels.size === 1 ? [...state.labels] : [], properties: {} };
+  const v = card || { title: "", column: defaults.column || b.columns[0].id,
+    summary: "", blocked: "", fields: [], sections: b.template.map((label) => ({ label, body: "" })), ...startingPicks(), properties: {} };
   const title = h("input", { maxLength: 200, value: v.title, autofocus: true });
   const group = h("select", {}, h("option", { value: "", text: "None" }), b.groups.map((g) => h("option", { value: g.id, text: g.name })));
   group.value = v.group || "";

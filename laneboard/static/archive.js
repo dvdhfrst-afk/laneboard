@@ -4,7 +4,7 @@ import { index, state } from "./state.js";
 import { when } from "./util.js";
 import { h, sheetHead, showSheet } from "./dom.js";
 import { openCard, setArchived } from "./card.js";
-import { matchesQuery } from "./search.js";
+import { matchesWords, wordsOf } from "./search.js";
 
 const ARCHIVE_PAGE = 100;
 
@@ -13,8 +13,8 @@ export function openArchive() {
   const list = h("div", { class: "archive-list" });
   let limit = ARCHIVE_PAGE;
   const draw = () => {
-    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
-    const found = index.archived.filter((c) => matchesQuery(c, words));
+    const words = wordsOf(search.value);
+    const found = index.archived.filter((c) => matchesWords(c, words));
     const row = (card) => {
       const said = h("span", { class: "form-error", role: "alert" });
       return h("div", { class: "archive-row" },

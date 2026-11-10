@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -31,9 +32,18 @@ SHORT = '<img src=x onerror="window.pwned=1">'
 
 
 def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """A free port, from LANEBOARD_TEST_PORTS (like 18700-18799) when that is set, so runs can keep to a range."""
+    span = os.environ.get("LANEBOARD_TEST_PORTS", "")
+    low, _, high = span.partition("-")
+    candidates = random.sample(range(int(low), int(high or low) + 1), int(high or low) - int(low) + 1) if low else [0]
+    for port in candidates:
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return s.getsockname()[1]
+    raise RuntimeError(f"No free port in {span}.")
 
 
 def sample_board(name="Work", cards=6):
@@ -93,6 +103,15 @@ class Harness:
 
     def card(self, key, i=0):
         return next(c for c in self.board(i)["cards"] if c["key"] == key)
+
+    def api(self, method, path, body=None):
+        """Call the JSON API the way a script on this computer would."""
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(self.url + path.lstrip("/"), data=data, method=method,
+                                         headers={"Content-Type": "application/json"} if data else {})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=10) as answer:
+            return json.load(answer)
 
     def seed(self, *boards):
         """Create the file through the import command, as a person would."""
@@ -739,10 +758,12 @@ class Features(BrowserCase):
         b["cards"][1]["blocked"] = "Waiting"
         page = self.start(b)
         page.click("#filters >> text=Home")
-        self.assertEqual(self.column_keys(page, "backlog"), ["T-1"])
+        self.wait_until(lambda: self.column_keys(page, "backlog") == ["T-1"], "the group filter")
+        self.assertEqual(page.input_value("#search"), "group:Home", "the chip writes its part of the search")
         page.click("#filters >> text=Show all")
+        self.wait_until(lambda: len(self.column_keys(page, "backlog")) == 6, "every card again")
         page.click("#filters >> text=Blocked")
-        self.assertEqual(self.column_keys(page, "backlog"), ["T-2"])
+        self.wait_until(lambda: self.column_keys(page, "backlog") == ["T-2"], "the blocked filter")
 
     def test_form_says_what_is_wrong(self):
         page = self.start(sample_board())
@@ -1133,12 +1154,12 @@ class Labels(PartsCase):
         page = self.start(b)
         self.assertEqual(page.locator("#filters .label-filter").count(), 2, "only labels in use")
         page.click("#filters .label-filter:has-text('Bug')")
-        self.assertEqual(self.column_keys(page, "backlog"), ["T-1"])
+        self.wait_until(lambda: self.column_keys(page, "backlog") == ["T-1"], "the label filter")
         self.assertIn("1 of 3", page.locator("#search-count").inner_text())
         page.click("#filters .label-filter:has-text('Docs')")
-        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-2"], "either label")
+        self.wait_until(lambda: self.column_keys(page, "backlog") == ["T-1", "T-2"], "either label")
         page.click("#filters >> text=Show all")
-        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-2", "T-3"])
+        self.wait_until(lambda: self.column_keys(page, "backlog") == ["T-1", "T-2", "T-3"], "every card again")
 
 
 class Properties(PartsCase):
@@ -1541,6 +1562,431 @@ class PartsSizes(PartsCase):
                 page.click(f"#tab-{tab}")
                 self.assertLessEqual(self.sheet_overflow(page), 0, f"settings {tab} at {width} px")
             self.close_sheet(page)
+
+
+
+def find_board(name="Parts", cards=8):
+    """A board with labels, points, a priority, a blocked card and a card in Doing, to search and sort."""
+    b = parts_board(name, cards=cards)
+    b["cards"][0].update(labels=["Bug"], properties={"Points": 5, "Priority": "High"}, blocked="Waiting on design")
+    b["cards"][1].update(labels=["Docs"], properties={"Points": 2}, title="Write the guide")
+    b["cards"][2].update(labels=["Bug", "Quick"], properties={"Points": 8, "Priority": "Low"})
+    b["cards"][3].update(column="Doing", title="Alpha")
+    return b
+
+
+class FindCase(PartsCase):
+    def keys(self, page):
+        return page.eval_on_selector_all("#board .card", "els => els.map(e => e.dataset.key)")
+
+    def server_keys(self, board_id, query, sort=""):
+        """The keys the server finds, asked directly, in the order it gives them."""
+        return self.app.api("GET", f"api/boards/{board_id}/search?{urllib.parse.urlencode({'q': query, 'sort': sort})}")["keys"]
+
+    def shows(self, page, keys, what="the board to show the search"):
+        self.wait_until(lambda: self.keys(page) == keys, f"{what}: {keys}")
+
+    def search(self, page, text, keys):
+        """Type a search, and wait for the board to show exactly what the server finds for it."""
+        page.fill("#search", text)
+        self.assertEqual(self.server_keys(self.app.board()["id"], text), keys, f"the server's answer for {text}")
+        self.shows(page, keys, text)
+
+
+class Searching(FindCase):
+    def test_the_search_language_from_the_box(self):
+        page = self.start(find_board())
+        self.search(page, "label:bug", ["T-1", "T-3"])
+        self.assertIn("2 of 8", page.locator("#search-count").inner_text())
+        self.search(page, "points:<5", ["T-2"])
+        self.search(page, "-label:bug column:backlog", ["T-2", "T-5", "T-6", "T-7", "T-8"])
+        self.search(page, 'title:"write the"', ["T-2"])
+        self.search(page, "(label:docs OR is:blocked) priority:high", ["T-1"])
+        self.search(page, "column:doing OR label:quick", ["T-3", "T-4"])
+        self.search(page, "card 6", ["T-6"])  # plain words still find what they always did
+        self.assertIn("card+6", page.evaluate("location.hash"), "the address keeps the search")
+
+    def test_a_bad_search_says_where_and_keeps_the_last_result(self):
+        page = self.start(find_board())
+        self.search(page, "label:bug", ["T-1", "T-3"])
+        page.fill("#search", "label:bug pionts:3")
+        page.wait_for_selector("#search-error:not([hidden])")
+        self.assertIn('no property called "pionts"', page.locator("#search-error").inner_text())
+        self.assertEqual(page.locator("#search-error mark").inner_text(), "pionts:3", "the bad spot is marked")
+        self.assertEqual(page.get_attribute("#search", "aria-invalid"), "true")
+        self.assertEqual(self.keys(page), ["T-1", "T-3"], "the board keeps the last search that worked")
+        page.click("#search-error .query-text")
+        self.assertEqual(page.evaluate("[document.activeElement.id, document.activeElement.selectionStart]"), ["search", 10])
+        page.fill("#search", "label:bug points:5")
+        self.shows(page, ["T-1"])
+        self.assertTrue(page.locator("#search-error").is_hidden())
+        self.assertEqual(page.get_attribute("#search", "aria-invalid"), "false")
+
+    def test_a_slow_answer_never_replaces_a_newer_one(self):
+        self.app.seed(find_board())
+        self.app.start()
+        self.context.add_init_script("""
+          const real = window.fetch;
+          window.fetch = async (url, opts) => {
+            if (String(url).includes("/search?") && String(url).includes("bug")) {
+              await new Promise((r) => setTimeout(r, 1500));
+              const answer = await real(url, { ...opts, signal: undefined });  // arrives even though it was given up on
+              window.slowAnswered = true;
+              return answer;
+            }
+            return real(url, opts);
+          };""")
+        page = self.open_page()
+        page.fill("#search", "label:bug")
+        page.wait_for_timeout(400)  # its request is on its way
+        page.fill("#search", "label:docs")
+        self.shows(page, ["T-2"])
+        self.until(page, "window.slowAnswered === true", timeout=5)
+        page.wait_for_timeout(200)
+        self.assertEqual(self.keys(page), ["T-2"], "the older answer came last and was not drawn")
+        self.assertIn("1 of 8", page.locator("#search-count").inner_text())
+
+    def test_the_chips_write_their_part_of_the_search(self):
+        page = self.start(find_board())
+        page.click("#filters .label-filter:has-text('Bug')")
+        self.assertEqual(page.input_value("#search"), "label:Bug")
+        self.shows(page, ["T-1", "T-3"])
+        self.assertEqual(page.get_attribute("#filters .label-filter:has-text('Bug')", "aria-pressed"), "true")
+        page.click("#filters .label-filter:has-text('Docs')")
+        self.assertEqual(page.input_value("#search"), "(label:Bug OR label:Docs)", "chips of one kind mean either")
+        self.shows(page, ["T-1", "T-2", "T-3"])
+        page.click("#filters .label-filter:has-text('Bug')")
+        page.click("#filters >> text=Blocked")
+        self.assertEqual(page.input_value("#search"), "label:Docs is:blocked", "different kinds narrow each other")
+        self.shows(page, [])
+        page.click("#filters .label-filter:has-text('Docs')")
+        self.assertEqual(page.input_value("#search"), "is:blocked")
+        self.shows(page, ["T-1"])
+        page.fill("#search", "points:>1 label:quick")
+        self.shows(page, ["T-3"])
+        self.assertEqual(page.get_attribute("#filters .label-filter:has-text('Quick')", "aria-pressed"), "true", "typed terms press their chip")
+        page.click("#new-card")
+        page.wait_for_selector("dialog[open] form")
+        self.assertIn("Quick", page.locator("#sheet").inner_text(), "a new card starts with the one label searched for")
+        page.click("text=Cancel")
+        self.until(page, "!document.querySelector('#sheet').open")
+        page.click("#filters >> text=Show all")
+        self.assertEqual(page.input_value("#search"), "")
+        self.assertEqual(len(self.keys(page)), 8)
+
+    def test_the_search_follows_changes_to_the_board(self):
+        page = self.start(find_board())
+        board_id = self.app.board()["id"]
+        self.search(page, "column:doing", ["T-4"])
+        self.app.api("PATCH", f"api/boards/{board_id}/cards/T-1", {"column": "doing"})  # from a script, or another tab
+        self.poll(page)
+        self.shows(page, ["T-1", "T-4"], "a card moved in elsewhere")
+        self.open_card(page, "T-4")
+        page.select_option("#card-column", "done")
+        self.close_sheet(page)
+        self.shows(page, ["T-1"], "a card moved out here")
+
+    def test_search_every_board_then_go_to_a_card(self):
+        page = self.start(find_board(), sample_board("Other"))
+        self.assertTrue(page.locator("#search-all").is_hidden())
+        page.fill("#search", "Card 3")
+        page.click("#search-all")
+        self.until(page, "document.querySelectorAll('.found-board').length === 2")
+        text = page.locator("#sheet").inner_text()
+        self.assertIn("Parts", text)
+        self.assertIn("Other", text)
+        page.click(".found-board:has-text('Other') .found-cards a")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Other'")
+        page.wait_for_selector("#card-notes")
+        self.assertEqual(page.locator("#sheet .key").inner_text(), "T-3")
+        self.assertEqual(page.input_value("#search"), "Card 3", "the board opens with the same search")
+        self.shows(page, ["T-3"])
+        self.close_sheet(page)
+        page.focus("#search")
+        page.keyboard.press("Shift+Enter")  # the keyboard way in
+        self.until(page, "document.querySelectorAll('.found-board').length === 2")
+        page.fill("#everywhere-search", "pionts:3")
+        page.wait_for_selector("#sheet .search-error mark")
+        self.assertIn("pionts", page.locator("#sheet .search-error").inner_text())
+
+
+class LargeSearch(FindCase):
+    CARDS = 2000
+
+    def test_searching_a_big_board_stays_quick(self):
+        columns = ["Backlog", "Doing", "Done"]
+        b = parts_board("Big", cards=0)
+        b["columns"] = columns
+        b["cards"] = [{"key": f"T-{i}", "title": f"Card {i}", "column": columns[i % 3], "rank": i,
+                       "labels": ["Bug"] if i % 7 == 0 else [], "properties": {"Points": i % 10}} for i in range(1, self.CARDS + 1)]
+        page = self.start(b)
+        board_id = self.app.board()["id"]
+        timings = {}
+        for text in ("label:bug points:>=5", "Card 1999", "(label:bug OR points:9) -column:done"):
+            want = self.server_keys(board_id, text)
+            start = time.perf_counter()
+            page.fill("#search", text)
+            # A column draws 300 cards until asked for more, so compare the count and that nothing else is drawn.
+            self.wait_until(lambda: page.locator("#search-count").inner_text().startswith(f"{len(want)} of")
+                            and set(self.keys(page)) <= set(want), f"the answer to {text}", timeout=10)
+            timings[text] = round(time.perf_counter() - start, 3)
+        report = os.environ.get("LANEBOARD_SEARCH_REPORT")
+        if report:
+            with open(report, "w", encoding="utf-8") as f:
+                json.dump({"cards": self.CARDS, "seconds": timings}, f, indent=1)
+        for text, seconds in timings.items():
+            self.assertLess(seconds, 3, f"{text} took {seconds} s on {self.CARDS} cards")
+
+
+class Sorting(FindCase):
+    def test_sort_by_a_property_and_a_part_both_ways(self):
+        page = self.start(find_board())
+        page.select_option("#sort-by", "points")
+        self.shows(page, ["T-2", "T-1", "T-3", "T-5", "T-6", "T-7", "T-8", "T-4"])
+        self.assertEqual(page.locator("#sort-dir").inner_text(), "Lowest first")
+        page.click("#sort-dir")
+        self.shows(page, ["T-3", "T-1", "T-2", "T-5", "T-6", "T-7", "T-8", "T-4"], "highest first, cards with no value still last")
+        self.assertIn("sort=-points", page.evaluate("location.hash"))
+        page.select_option("#sort-by", "title")
+        self.shows(page, ["T-1", "T-3", "T-5", "T-6", "T-7", "T-8", "T-2", "T-4"])
+        page.reload()
+        self.shows(page, ["T-1", "T-3", "T-5", "T-6", "T-7", "T-8", "T-2", "T-4"], "the address keeps the sort")
+        self.assertEqual(page.input_value("#sort-by"), "title")
+        page.fill("#search", "label:bug")
+        page.select_option("#sort-by", "points")
+        page.click("#sort-dir")
+        self.shows(page, ["T-3", "T-1"], "a search and a sort together")
+        page.select_option("#sort-by", "")
+        self.shows(page, ["T-1", "T-3"])
+        self.assertNotIn("sort=", page.evaluate("location.hash"))
+        self.assertTrue(page.locator("#sort-dir").is_hidden())
+
+    def test_a_sorted_board_moves_cards_between_columns_only(self):
+        page = self.start(find_board())
+        page.select_option("#sort-by", "title")
+        self.shows(page, ["T-1", "T-3", "T-5", "T-6", "T-7", "T-8", "T-2", "T-4"])
+        self.assertTrue(page.locator("#sort-hint").is_visible())
+        ranks = {c["key"]: c["rank"] for c in self.app.board()["cards"]}
+        page.drag_and_drop('.card[data-key="T-2"]', '.card[data-key="T-1"]', target_position={"x": 20, "y": 2})
+        page.wait_for_timeout(400)
+        self.assertEqual({c["key"]: c["rank"] for c in self.app.board()["cards"]}, ranks, "no reordering by drag")
+        page.focus('.card[data-key="T-3"]')
+        page.keyboard.press("Shift+ArrowUp")
+        self.assertIn("can't be moved up or down", self.toast(page))
+        self.until(page, "document.querySelector('#live').textContent.includes(\"can't be moved up or down\")")
+        page.wait_for_timeout(300)
+        self.assertEqual({c["key"]: c["rank"] for c in self.app.board()["cards"]}, ranks, "nor by keyboard")
+        page.keyboard.press("Shift+ArrowRight")
+        self.wait_until(lambda: self.app.card("T-3")["column"] == "doing", "a move to the next column")
+        page.drag_and_drop('.card[data-key="T-5"]', '[data-col="done"]')
+        self.wait_until(lambda: self.app.card("T-5")["column"] == "done", "a drag to another column")
+        self.open_card(page, "T-6")
+        self.assertTrue(page.locator('#sheet button[aria-label="Move up"]').is_disabled())
+        self.close_sheet(page)
+        page.click("#sort-hint >> text=Use manual order")
+        self.assertTrue(page.locator("#sort-hint").is_hidden())
+        page.focus('.card[data-key="T-7"]')
+        page.keyboard.press("Shift+ArrowUp")
+        self.wait_until(lambda: self.column_keys(page, "backlog").index("T-7") < self.column_keys(page, "backlog").index("T-6"), "a move by hand again")
+
+
+class SavedViewsPage(FindCase):
+    def test_a_view_round_trip_through_reload(self):
+        page = self.start(find_board())
+        board_id = self.app.board()["id"]
+        page.fill("#search", "label:bug")
+        page.select_option("#sort-by", "points")
+        page.click("#sort-dir")
+        self.shows(page, ["T-3", "T-1"])
+        page.click("#views-summary")
+        page.click("#views >> text=Save view")
+        page.fill("dialog[open] input[maxlength='60']", "Big bugs")
+        page.check("dialog[open] input[type=checkbox]")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        saved = self.app.board()
+        self.assertEqual([(v["name"], v["query"], v["sort"]) for v in saved["views"]], [("Big bugs", "label:bug", "-points")])
+        self.assertEqual(saved["settings"]["defaultView"], saved["views"][0]["id"])
+        self.assertIn("Big bugs", page.locator("#views-summary").inner_text())
+        page.reload()
+        self.shows(page, ["T-3", "T-1"], "the address reopens the view")
+        self.assertEqual(page.input_value("#search"), "label:bug")
+        self.assertEqual(page.locator("#sort-dir").inner_text(), "Highest first")
+        page.locator("#search").press("Escape")
+        self.assertIn("Big bugs (changed)", page.locator("#views-summary").inner_text())
+        fresh = self.open_page(f"#{board_id}")  # no search in the address: the board's default view
+        self.shows(fresh, ["T-3", "T-1"], "the default view")
+        self.assertEqual(fresh.input_value("#search"), "label:bug")
+        fresh.close()
+        page.fill("#search", "label:bug -is:blocked")
+        page.click("#views-summary")
+        page.click("#views >> text=Update Big bugs to this search")
+        self.wait_until(lambda: self.app.board()["views"][0]["query"] == "label:bug -is:blocked", "the view to update")
+        self.assertNotIn("changed", page.locator("#views-summary").inner_text())
+        page.click("#views-summary")
+        page.click("#views >> text=Manage views")
+        page.fill("dialog[open] .v-name", "Bugs by points")
+        page.check("dialog[open] input[name=default-view][value='']")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        saved = self.app.board()
+        self.assertEqual(saved["views"][0]["name"], "Bugs by points")
+        self.assertIsNone(saved["settings"]["defaultView"])
+        page.fill("#search", "")
+        page.select_option("#sort-by", "")
+        self.shows(page, ["T-1", "T-2", "T-3", "T-5", "T-6", "T-7", "T-8", "T-4"])
+        page.focus('.card[data-key="T-1"]')
+        page.keyboard.press("v")
+        self.assertTrue(page.evaluate("document.activeElement.classList.contains('view-item')"), "v opens the views")
+        page.keyboard.press("Enter")
+        self.shows(page, ["T-3"], "picking a view")
+        page.click("#views-summary")
+        page.click("#views >> text=Manage views")
+        page.click("dialog[open] .view-row >> text=Remove")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        self.assertEqual(self.app.board()["views"], [])
+        self.assertIn("Views", page.locator("#views-summary").inner_text())
+
+    def test_a_view_that_stopped_working_says_why_and_can_be_fixed(self):
+        b = find_board()
+        b["views"] = [{"name": "Pointed", "query": "points:>=3", "sort": ""}]
+        self.app.seed(b)
+        self.app.start()
+        board = self.app.board()
+        self.app.api("PATCH", f"api/boards/{board['id']}", {"properties": [p for p in board["properties"] if p["name"] != "Points"]})
+        page = self.open_page()
+        page.click("#views-summary")
+        page.click("#views .view-item")
+        page.wait_for_selector("#search-error:not([hidden])")
+        self.assertIn('"points"', page.locator("#search-error").inner_text())
+        page.click("#search-error >> text=Edit the view Pointed")
+        page.wait_for_selector("dialog[open] .view-row .form-error mark")
+        self.assertIn("doesn't work any more", page.locator("dialog[open] .view-row .form-error").inner_text())
+        self.assertEqual(page.evaluate("document.activeElement.className"), "v-query")
+        page.fill("dialog[open] .v-query", "label:bug")
+        self.until(page, "!document.querySelector('dialog[open] .view-row mark')")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        self.assertEqual(self.app.board()["views"][0]["query"], "label:bug")
+        page.click("#views-summary")
+        page.click("#views .view-item")
+        self.shows(page, ["T-1", "T-3"])
+
+
+class TemplatesPage(FindCase):
+    def test_templates_from_new_board_to_delete(self):
+        page = self.start(find_board())
+        page.click("#new-board")
+        page.wait_for_selector("dialog[open] .template-choice:has-text('Software')")
+        choices = page.locator("dialog[open] .template-choice").all_inner_texts()
+        self.assertTrue(choices[0].startswith("Empty board"))
+        self.assertTrue(page.is_checked("dialog[open] .template-choice input[value='']"), "an empty board is the start")
+        software = next(c for c in choices if c.startswith("Software"))
+        self.assertIn("built in", software.lower())
+        self.assertRegex(software, r"\d+ columns, \d+ starter cards")
+        page.check("dialog[open] .template-choice:has-text('Software') input")
+        self.assertEqual(page.get_attribute("dialog[open] input[maxlength='120']", "placeholder"), "Software team")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Software team'")
+        made = next(b for b in self.app.load()["boards"] if b["name"] == "Software team")
+        self.assertLessEqual({"Bug", "Feature", "Chore"}, {label["name"] for label in made["labels"]})
+        parts = next(b for b in self.app.load()["boards"] if b["name"] == "Parts")
+        page.select_option("#board-pick", parts["id"])
+        self.until(page, "document.querySelector('#board-name').textContent === 'Parts'")
+        page.click("#menu summary")
+        page.click("#menu >> text=Save as template")
+        page.fill("dialog[open] input[maxlength='120']", "Parts setup")
+        page.fill("dialog[open] textarea", "Labels and every kind of property")
+        page.check("dialog[open] input[type=checkbox]")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+        self.assertIn("Saved the template Parts setup", self.toast(page))
+        self.assertEqual([(t["name"], len(t["cards"])) for t in self.app.load()["templates"]], [("Parts setup", 8)])
+        page.click("#new-board")
+        mine = page.locator("dialog[open] .template-choice:has-text('Parts setup')")
+        mine.wait_for()
+        self.assertIn("yours", mine.inner_text().lower())
+        self.assertIn("3 columns, 8 starter cards", mine.inner_text())
+        page.click("dialog[open] >> text=Cancel")
+        self.until(page, "!document.querySelector('#sheet').open")
+        page.click("#menu summary")
+        page.click("#menu >> text=Templates")
+        page.wait_for_selector("dialog[open] .template-row[data-id]")
+        self.assertEqual(page.locator("dialog[open] .template-row:not([data-id]) :is(input, textarea)").count(), 0,
+                         "built-in templates are locked")
+        self.assertGreaterEqual(page.locator("dialog[open] .template-row:not([data-id])").count(), 6)
+        row = page.locator("dialog[open] .template-row[data-id]")
+        row.locator("input").fill("Parts kit")
+        row.locator("textarea").fill("Shared setup")
+        row.locator("text=Save changes").click()
+        self.wait_until(lambda: self.app.load()["templates"][0]["name"] == "Parts kit", "the rename to save")
+        self.assertEqual(self.app.load()["templates"][0]["description"], "Shared setup")
+        row.locator("text=New board from this").click()
+        page.wait_for_selector("dialog[open] .template-choice:has-text('Parts kit') input:checked")
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Parts kit'")
+        made = next(b for b in self.app.load()["boards"] if b["name"] == "Parts kit")
+        self.assertEqual((len(made["cards"]), len(made["labels"]), len(made["properties"])), (8, 3, 7))
+        page.click("#menu summary")
+        page.click("#menu >> text=Templates")
+        page.click("dialog[open] .template-row[data-id] >> text=Delete")
+        page.click("dialog[open] .confirm button.danger")
+        self.wait_until(lambda: self.app.load()["templates"] == [], "the template to go")
+        self.assertEqual(page.locator("dialog[open] .template-row[data-id]").count(), 0)
+
+
+class FindSizes(FindCase):
+    def sheet_overflow(self, page):
+        return page.evaluate("document.querySelector('#sheet').scrollWidth - document.querySelector('#sheet').clientWidth")
+
+    def test_narrow_screens(self):
+        long = "Unbroken" * 30
+        b = find_board()
+        b["views"] = [{"name": long[:60], "query": f'title:"{long[:200]}"', "sort": "-points"}]
+        page = self.start(b, sample_board("Other"))
+        for width, height in [(390, 844), (320, 568)]:
+            page.set_viewport_size({"width": width, "height": height})
+            page.fill("#search", f"label:bug {long[:100]}:3")
+            page.wait_for_selector("#search-error:not([hidden])")
+            page.select_option("#sort-by", "title")
+            page.click("#views-summary")
+            page.wait_for_timeout(50)
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0, f"board at {width} px")
+            menu = page.evaluate("(() => { const r = document.querySelector('#view-items').getBoundingClientRect(); return [r.left, r.right]; })()")
+            self.assertGreaterEqual(menu[0], 0, f"views menu at {width} px")
+            self.assertLessEqual(menu[1], width, f"views menu at {width} px")
+            page.click("#views >> text=Save view")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"save view at {width} px")
+            self.close_sheet(page)
+            page.click("#views-summary")
+            page.click("#views >> text=Manage views")
+            page.wait_for_selector("dialog[open] .view-row")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"manage views at {width} px")
+            self.close_sheet(page)
+            page.fill("#search", "card")
+            page.click("#search-all")
+            self.until(page, "document.querySelectorAll('.found-board').length === 2")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"every board at {width} px")
+            self.close_sheet(page)
+            page.click("#new-board")
+            page.wait_for_selector("dialog[open] .template-choice:has-text('Software')")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"new board at {width} px")
+            self.close_sheet(page)
+            page.click("#menu summary")
+            page.click("#menu >> text=Save as template")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"save as template at {width} px")
+            self.close_sheet(page)
+            page.click("#menu summary")
+            page.click("#menu >> text=Templates")
+            page.wait_for_selector("dialog[open] .template-row")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"templates at {width} px")
+            self.close_sheet(page)
+            page.keyboard.press("?")
+            page.wait_for_selector("#sheet >> text=Searching")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"help at {width} px")
+            self.close_sheet(page)
+            page.select_option("#sort-by", "")
 
 
 if __name__ == "__main__":

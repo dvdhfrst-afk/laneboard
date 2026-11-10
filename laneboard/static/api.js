@@ -5,8 +5,11 @@ import { renderBanner } from "./dom.js";
 import { showBoard } from "./board.js";
 import { saveDrafts } from "./card.js";
 
-export async function api(method, path, body, rev) {
-  const opts = { method, headers: {} };
+// An error carries the HTTP status (0 when the server can't be reached) and the whole answer as `detail`, which for
+// a search the server can't read says where it stopped. `signal` can cancel a request that's no longer wanted; a
+// cancelled one rejects with an AbortError and says nothing about the server being gone.
+export async function api(method, path, body, rev, signal) {
+  const opts = { method, headers: {}, signal };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = typeof body === "string" ? body : JSON.stringify(body);
@@ -15,13 +18,14 @@ export async function api(method, path, body, rev) {
   let res;
   try {
     res = await fetch(path, opts);
-  } catch {
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
     setOffline(true);
     throw Object.assign(new Error(`Can't reach the board server. Start it again with: ${START_COMMAND}`), { status: 0 });
   }
   setOffline(false);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || `The server answered ${res.status}.`), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || `The server answered ${res.status}.`), { status: res.status, detail: data });
   return data;
 }
 
