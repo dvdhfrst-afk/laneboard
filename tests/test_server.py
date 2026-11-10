@@ -51,7 +51,10 @@ class ServerTest(unittest.TestCase):
         self.assertIn(b"<title>Laneboard</title>", body)
         self.assertIn("default-src 'none'", res.getheader("Content-Security-Policy"))
         self.assertEqual(res.getheader("X-Content-Type-Options"), "nosniff")
-        for name in ("app.js", "app.css", "icon.svg"):
+        # The page is several modules; one the server won't serve stops the whole page loading.
+        names = os.listdir(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "laneboard", "static"))
+        self.assertIn("main.js", names)
+        for name in names:
             status, _, _ = self.request("GET", "/static/" + name)
             self.assertEqual(status, 200, name)
 

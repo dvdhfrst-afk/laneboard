@@ -34,8 +34,9 @@ def repo_text_files():
 
 class Versions(unittest.TestCase):
     def test_the_page_and_program_agree(self):
-        text = (ROOT / "laneboard" / "static" / "app.js").read_text(encoding="utf-8")
-        self.assertIn(f'const APP_VERSION = "{__version__}";', text)
+        found = [version for path in sorted((ROOT / "laneboard" / "static").glob("*.js"))
+                 for version in re.findall(r'^(?:export )?const APP_VERSION = "([^"]*)";$', path.read_text(encoding="utf-8"), re.M)]
+        self.assertEqual(found, [__version__], "the page defines APP_VERSION once, matching the program")
 
     def test_the_changelog_covers_this_version(self):
         self.assertIn(f"## {__version__}\n", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
