@@ -18,12 +18,14 @@ from contextlib import contextmanager
 from . import schema, storage
 from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
 from .query import QueryError, prepare
+from .templates import (BUILTIN_IDS, board_from_template, builtin_templates, describe, find_template, get_template,
+                        template_from_board)
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
                      CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
                      MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
                      MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
                      MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
-                     MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort,
+                     MAX_TEMPLATES, MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort,
                      now, rows, slug, text)
 
 DEFAULT_COLUMNS = [("Backlog", None), ("Ready", None), ("In progress", 1), ("Review", None), ("Done", None)]
@@ -243,9 +245,22 @@ class Store:
                 raise Conflict(f"A file can hold at most {MAX_BOARDS} boards.")
             self._save({**self.data, "boards": self.data["boards"] + boards})
 
-    def create_board(self, name, description=""):
-        board = self._new_board(text(name, "Board name", MAX_NAME, required=True),
-                                description=text(description, "Description", MAX_SUMMARY))
+    def create_board(self, name, description=None, template=None):
+        """Add a board. With `template` (a template's id or name) it gets that template's structure and starter
+        cards, named `name` or, when that is empty, after the template, and described as the template is unless
+        `description` is given."""
+        if template is None:
+            board = self._new_board(text(name, "Board name", MAX_NAME, required=True),
+                                    description=text(description, "Description", MAX_SUMMARY))
+        else:
+            if not isinstance(template, str):
+                raise StoreError("Say which template to use by its id or name.")
+            with self._lock:
+                self._refresh()
+                chosen = get_template(self.data["templates"], template)
+            name = text(name, "Board name", MAX_NAME) or None
+            description = None if description is None else text(description, "Description", MAX_SUMMARY)
+            board = self._imported_board(board_from_template(chosen, name, description))
         self._add_boards([board])
         return board
 
@@ -480,6 +495,75 @@ class Store:
             else:
                 out[prop["id"]] = cleaned
         return out
+
+    # ---- templates -----------------------------------------------------------------------------
+    #
+    # Saved templates live in the file's top-level list, saved with the same lock and backups as boards.
+    # Changing one never touches a board, so no board's rev moves.
+
+    def list_templates(self):
+        """The built-in templates, then the saved ones, as listings: {id, name, description, builtIn, columns, cards}."""
+        return [describe(t) for t in builtin_templates() + self.saved_templates()]
+
+    def saved_templates(self):
+        with self._lock:
+            self._refresh()
+            return self.data["templates"]
+
+    def save_template(self, board_id, name, description="", cards=False):
+        """Save a board's structure as a template, with its cards as starter cards if `cards`. Returns the template."""
+        if not isinstance(cards, bool):
+            raise StoreError("cards must be true or false: whether the template keeps the board's cards.")
+        with self._changing():
+            _, board = self._find(board_id)
+            saved = self.data["templates"]
+            if len(saved) >= MAX_TEMPLATES:
+                raise Conflict(f"A file can hold at most {MAX_TEMPLATES} saved templates. Delete one you don't use first.")
+            template = template_from_board(board, name, description, include_cards=cards, taken_ids=[t["id"] for t in saved])
+            self._unique_template_name(template["name"], saved)
+            self._save({**self.data, "templates": saved + [template]})
+        return template
+
+    def update_template(self, template_id, changes):
+        """Rename a saved template or change its description. Built-in templates can't be changed."""
+        self._only(changes, ("name", "description"), "Templates")
+        with self._changing():
+            i, template = self._saved_template(template_id)
+            template = dict(template)
+            if "name" in changes:
+                template["name"] = text(changes["name"], "The template name", MAX_NAME, required=True)
+                self._unique_template_name(template["name"], self.data["templates"], template_id)
+            if "description" in changes:
+                template["description"] = text(changes["description"], "The template description", MAX_SUMMARY)
+            templates = list(self.data["templates"])
+            templates[i] = template
+            self._save({**self.data, "templates": templates})
+        return template
+
+    def delete_template(self, template_id):
+        """Delete a saved template, keeping a backup of the file first. Built-in templates can't be deleted."""
+        with self._changing():
+            i, template = self._saved_template(template_id)
+            storage.tagged_snapshot(self.path, "before-delete")
+            templates = self.data["templates"]
+            self._save({**self.data, "templates": templates[:i] + templates[i + 1:]})
+        return template
+
+    def _saved_template(self, template_id):
+        if template_id in BUILTIN_IDS:
+            name = find_template([], template_id)["name"]
+            raise Conflict(f"{name} is a built-in template, so it can't be changed or deleted. Save a board as a "
+                           "template of your own instead.")
+        for i, template in enumerate(self.data["templates"]):
+            if template["id"] == template_id:
+                return i, template
+        raise NotFound("There's no saved template with that id. It may have been deleted.")
+
+    @staticmethod
+    def _unique_template_name(name, saved, own_id=None):
+        for template in builtin_templates() + saved:
+            if template["id"] != own_id and template["name"].strip().casefold() == name.casefold():
+                raise Conflict(f"There's already a template called {template['name']}. Choose another name.")
 
     # ---- cards ---------------------------------------------------------------------------------
 

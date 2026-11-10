@@ -85,6 +85,41 @@ class CardsAndSearch(Case):
         self.unchanged("search", "x", "--board", "Nope", says="There's no board called 'Nope'.")
 
 
+class Templates(Case):
+    def test_the_listing(self):
+        lines = self.lines("templates")
+        self.assertEqual(len(lines), 6)
+        self.assertTrue(lines[0].startswith("basic                Basic (5 columns, 4 starter cards). Five plain columns"))
+        listed = json.loads(self.run_cli("templates", "--json")[0])
+        self.assertEqual([t["id"] for t in listed], ["basic", "software", "personal", "content", "support", "research"])
+        self.run_cli("templates", "--json", "delete", "basic", "--yes", code=2)
+
+    def test_a_new_board_from_a_template(self):
+        out = self.lines("new", "Chores", "--template", "personal")
+        self.assertRegex(out[0], r"^Added Chores as b-[0-9a-f]{8}, from the template Personal, with 4 cards\.$")
+        self.assertEqual([c["name"] for c in self.board("Chores")["columns"]], ["To do", "Doing", "Done"])
+        self.run_cli("new", "", "--template", "Software team")
+        self.assertEqual(len(self.board("Software team")["cards"]), 5)
+        self.unchanged("new", "X", "--template", "weekly", says="There's no template called weekly. The templates are: Basic")
+
+    def test_saving_and_deleting(self):
+        self.run_cli("new", "Work", "--template", "software")
+        self.assertEqual(self.lines("templates", "save", "Work", "Our setup", "--description", "How we work"),
+                         ["Saved Our setup as the template our-setup (5 columns, no starter cards)."])
+        self.assertEqual(self.lines("templates", "save", "Work", "With cards", "--cards"),
+                         ["Saved With cards as the template with-cards (5 columns, 5 starter cards)."])
+        self.assertEqual(self.lines("templates")[-2:], [
+            "our-setup            Our setup (5 columns, no starter cards, saved). How we work",
+            "with-cards           With cards (5 columns, 5 starter cards, saved)."])
+        self.unchanged("templates", "save", "Work", "our SETUP", says="There's already a template called Our setup.")
+        self.unchanged("templates", "delete", "Our setup", code=2, says="add --yes to delete it")
+        self.unchanged("templates", "delete", "Basic", "--yes", says="Basic is a built-in template")
+        self.assertEqual(self.lines("templates", "delete", "our setup", "--yes"), ["Deleted the template Our setup."])
+        self.run_cli("new", "Again", "--template", "With cards")
+        self.assertEqual(len(self.board("Again")["cards"]), 5)
+        self.assertEqual(self.board("Work")["rev"], 1, "saving templates never changes a board")
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

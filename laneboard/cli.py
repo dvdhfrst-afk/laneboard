@@ -19,6 +19,7 @@ from .query import QueryError, broken_views, describe_error, run, search_boards
 from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
 from .server import BoardServer, encode_json
 from .store import Store, default_data_path, restore_backup, resolve_path
+from .templates import describe, get_template
 
 DEFAULT_PORT = 8642
 PROG = "laneboard"
@@ -467,8 +468,40 @@ def split_pair(given, option, shape, parser):
 
 def cmd_new(args):
     store = Store(args.data, starter=False)  # the new board is the first thing in a new file
-    board = store.create_board(args.name, args.description or "")
-    print(f"Added {board['name']} as {board['id']}.")
+    board = store.create_board(args.name, args.description, template=args.template)
+    if args.template is None:
+        print(f"Added {board['name']} as {board['id']}.")
+        return
+    template = get_template(store.saved_templates(), args.template)
+    print(f"Added {board['name']} as {board['id']}, from the template {template['name']}, with {count(len(board['cards']), 'card')}.")
+
+
+def template_line(t):
+    cards = count(t["cards"], "starter card") if t["cards"] else "no starter cards"
+    about = f" {t['description']}" if t["description"] else ""
+    return f"{t['id']:<20} {t['name']} ({count(t['columns'], 'column')}, {cards}{'' if t['builtIn'] else ', saved'}).{about}"
+
+
+def cmd_templates(args):
+    if args.json and args.action:
+        args.parser.error("--json goes with listing the templates")
+    store = Store(args.data, starter=False)
+    if args.action == "save":
+        template = store.save_template(find_board(store, args.board), args.name, args.description, args.cards)
+        shown = describe(template)
+        cards = count(shown["cards"], "starter card") if shown["cards"] else "no starter cards"
+        print(f"Saved {shown['name']} as the template {shown['id']} ({count(shown['columns'], 'column')}, {cards}).")
+    elif args.action == "delete":
+        if not args.yes:
+            args.parser.error("deleting a template can't be undone except by restoring a backup; add --yes to delete it")
+        template = get_template(store.saved_templates(), args.name)
+        store.delete_template(template["id"])
+        print(f"Deleted the template {template['name']}.")
+    elif args.json:
+        write_json(store.list_templates(), None, False)
+    else:
+        for t in store.list_templates():
+            print(template_line(t))
 
 
 def cmd_labels(args):
@@ -833,7 +866,20 @@ def build_parser():
     p.add_argument("--column", help="column on the other board (default: one with the same name, or else the first)")
     p = command("new", cmd_new, "make a new board")
     p.add_argument("name", help="the board's name")
-    p.add_argument("--description", help="a line about what the board is for")
+    p.add_argument("--description", help="a line about what the board is for (default: the template's, if there is one)")
+    p.add_argument("--template", metavar="T", help="start from a template, by id or name (see laneboard templates)")
+    p = command("templates", cmd_templates, "list the templates a new board can start from, or save and delete your own")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    actions = p.add_subparsers(dest="action", metavar="action")
+    a = actions.add_parser("save", parents=[common], help="save a board as a template", description="Save a board as a template.")
+    a.add_argument("board", help="board id or name")
+    a.add_argument("name", help="the template's name")
+    a.add_argument("--cards", action="store_true", help="keep the board's cards (without their notes) as starter cards")
+    a.add_argument("--description", help="a line about what the template is for")
+    a = actions.add_parser("delete", parents=[common], help="delete a template you saved",
+                           description="Delete a template you saved.")
+    a.add_argument("name", help="template id or name")
+    a.add_argument("--yes", action="store_true", help="really delete it (there's no undo but restoring a backup)")
     p = command("labels", cmd_labels, "list a board's labels, or add, rename and remove them")
     p.add_argument("board", help="board id or name")
     p.add_argument("--add", metavar="NAME", help="add a label")

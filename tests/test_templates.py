@@ -10,7 +10,7 @@ from laneboard import properties as P
 from laneboard import query as Q
 from laneboard import schema
 from laneboard import templates as T
-from laneboard.schema import COLORS, BadFile, NotFound, StoreError, slug
+from laneboard.schema import COLORS, BadFile, NotFound, StoreError
 from laneboard.store import Store
 
 PARTS = ("group", "labels", "field", "progress", "blocked")
@@ -636,48 +636,173 @@ class BackToABoard(unittest.TestCase):
         self.assertEqual(len(T.board_from_template(T.template_from_board(native_board(), "Full", include_cards=True))["cards"]), 2)
 
 
+class MakingBoards(unittest.TestCase):
+    """Every built-in template makes a board through the real store, the way the page and the command line do."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = Store(os.path.join(tmp.name, "boards.json"), starter=False)
+
+    def test_every_built_in_makes_a_board_that_works(self):
+        for t in T.builtin_templates():
+            with self.subTest(template=t["id"]):
+                board = self.store.create_board("", template=t["id"])
+                self.assertEqual((board["name"], board["description"]), (t["name"], t["description"]))
+                self.assertEqual([c["name"] for c in board["columns"]], [c["name"] for c in t["board"]["columns"]])
+                self.assertEqual(Q.broken_views(board), [])
+                found = [Q.search(board, view["query"], view["sort"]) for view in board["views"]]
+                self.assertTrue(any(found), "at least one view finds a starter card")
+                keys = {c["key"] for c in board["cards"]}
+                self.assertTrue(all(set(k) <= keys for k in found))
+                self.assertEqual(board["settings"]["limitPolicy"], t["board"].get("settings", {}).get("limitPolicy", "warn"))
+                self.assert_starter_cards(t, board)
+
+    def assert_starter_cards(self, template, board):
+        columns = {c["id"]: c["name"] for c in board["columns"]}
+        labels = {x["id"]: x["name"] for x in board["labels"]}
+        self.assertEqual(sorted(c["title"] for c in board["cards"]), sorted(c["title"] for c in template["cards"]))
+        for starter in template["cards"]:
+            card = next(c for c in board["cards"] if c["title"] == starter["title"])
+            where = f"{template['id']}: {starter['title']}"
+            self.assertEqual(columns[card["column"]].casefold(), starter["column"].casefold(), where)
+            self.assertEqual({labels[i].casefold() for i in card["labels"]}, {n.casefold() for n in starter.get("labels", [])}, where)
+            expected = {}
+            for name, value in (starter.get("properties") or {}).items():
+                prop = P.find_property(board, name)
+                expected[prop["id"]] = P.TYPES[prop["type"]].parse_text(value, prop)
+            self.assertEqual(card["properties"], expected, where)
+            self.assertTrue(all(v is not None for v in card["properties"].values()), where)
+            self.assertEqual([(x["text"], x["done"]) for x in card["tasks"]],
+                             [(x["text"], x.get("done", False)) for x in starter.get("tasks", [])], where)
+
+    def test_a_name_and_description_of_its_own(self):
+        board = self.store.create_board("Chores", "House stuff", template="Personal")
+        self.assertEqual((board["name"], board["description"]), ("Chores", "House stuff"))
+        self.assertEqual(self.store.create_board("  ", "", template="personal")["description"], "")
+
+    def test_an_unknown_template_adds_nothing(self):
+        with self.assertRaises(NotFound) as caught:
+            self.store.create_board("X", template="weekly")
+        self.assertIn("There's no template called weekly. The templates are: Basic, Software team", str(caught.exception))
+        with self.assertRaises(StoreError) as caught:
+            self.store.create_board("X", template=["basic"])
+        self.assertIn("Say which template to use", str(caught.exception))
+        self.assertEqual(self.store.list_boards(), [])
+
+
+class SavedTemplates(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = os.path.join(tmp.name, "boards.json")
+        self.store = Store(self.path, starter=False)
+        made = self.store.create_board("Work", template="software")
+        self.board = made["id"]
+        self.store.update_card(self.board, made["cards"][0]["key"], {"notes": "Private working notes"})
+        self.before = self.store.get_board(self.board)
+
+    def on_disk(self):
+        with open(self.path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def assert_board_untouched(self):
+        board = self.store.get_board(self.board)
+        self.assertEqual((board["rev"], board["updated"]), (self.before["rev"], self.before["updated"]))
+        self.assertEqual(self.on_disk()["boards"][0]["rev"], self.before["rev"])
+
+    def test_saving_is_kept_in_the_file_and_moves_no_board_rev(self):
+        template = self.store.save_template(self.board, "Our setup", "How we work")
+        self.assertEqual((template["id"], template["name"], template["description"], template["cards"]),
+                         ("our-setup", "Our setup", "How we work", []))
+        self.assertEqual(self.on_disk()["templates"], [template])
+        self.assertTrue(os.path.exists(self.path + ".bak"), "the save before it is kept, as for any save")
+        self.assert_board_untouched()
+        self.assertEqual(Store(self.path).saved_templates(), [template], "another program sees it")
+
+    def test_with_cards_keeps_them_without_notes(self):
+        template = self.store.save_template(self.board, "With cards", cards=True)
+        self.assertEqual(len(template["cards"]), 5)
+        self.assertNotIn("Private working notes", json.dumps(template))
+        board = self.store.create_board("Again", template="with cards")
+        self.assertEqual(sorted(c["title"] for c in board["cards"]), sorted(c["title"] for c in self.before["cards"]))
+        self.assertEqual([v["query"] for v in board["views"]], [v["query"] for v in self.before["views"]])
+
+    def test_the_listing(self):
+        self.store.save_template(self.board, "Our setup", cards=True)
+        listed = self.store.list_templates()
+        self.assertEqual([t["id"] for t in listed], list(T.BUILTIN_IDS) + ["our-setup"])
+        self.assertEqual(listed[-1], {"id": "our-setup", "name": "Our setup", "description": "", "builtIn": False,
+                                      "columns": 5, "cards": 5})
+
+    def test_names_are_unique_among_every_template(self):
+        self.store.save_template(self.board, "Our setup")
+        for name in ("our SETUP", "Basic", " software TEAM "):
+            with self.subTest(name=name), self.assertRaises(StoreError) as caught:
+                self.store.save_template(self.board, name)
+            self.assertIn("There's already a template called", str(caught.exception))
+            self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(len(self.store.saved_templates()), 1)
+
+    def test_refusals_change_nothing(self):
+        with open(self.path, "rb") as f:
+            raw = f.read()
+        for call, phrase in ((lambda: self.store.save_template(self.board, ""), "can't be empty"),
+                             (lambda: self.store.save_template(self.board, "X", cards="yes"), "cards must be true or false"),
+                             (lambda: self.store.save_template("b-nothere", "X"), "doesn't exist"),
+                             (lambda: self.store.update_template("basic", {"name": "Mine"}), "built-in template"),
+                             (lambda: self.store.delete_template("software"), "built-in template"),
+                             (lambda: self.store.update_template("nope", {"name": "Mine"}), "no saved template"),
+                             (lambda: self.store.delete_template("nope"), "no saved template"),
+                             (lambda: self.store.update_template("nope", {"colour": 1}), "Templates have no colour field")):
+            with self.subTest(phrase=phrase), self.assertRaises(StoreError) as caught:
+                call()
+            self.assertIn(phrase, str(caught.exception))
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), raw)
+
+    def test_a_board_with_a_view_that_stopped_working_can_not_be_saved(self):
+        self.store.update_board(self.board, {"properties": [p for p in self.before["properties"] if p["name"] != "Points"]})
+        with self.assertRaises(StoreError) as caught:
+            self.store.save_template(self.board, "Broken")
+        self.assertEqual(str(caught.exception), "That board can't be saved as a template: its saved view \"Big items\" doesn't "
+                         "work any more. There's no property called \"points\". Properties: Priority, Component. Change or "
+                         "remove that view first.")
+
+    def test_renaming_and_describing(self):
+        self.store.save_template(self.board, "Our setup")
+        self.store.save_template(self.board, "Other")
+        changed = self.store.update_template("our-setup", {"name": " Our SETUP ", "description": "Now described"})
+        self.assertEqual((changed["id"], changed["name"], changed["description"]), ("our-setup", "Our SETUP", "Now described"))
+        with self.assertRaises(StoreError):
+            self.store.update_template("our-setup", {"name": "other"})
+        self.assertEqual([t["name"] for t in self.on_disk()["templates"]], ["Our SETUP", "Other"])
+        self.assert_board_untouched()
+
+    def test_deleting_keeps_a_backup_first(self):
+        self.store.save_template(self.board, "Our setup")
+        self.store.delete_template("our-setup")
+        self.assertEqual(self.on_disk()["templates"], [])
+        backups = os.listdir(self.path + ".backups")
+        snapshot = next(name for name in backups if name.endswith("-before-delete.json"))
+        with open(os.path.join(self.path + ".backups", snapshot), encoding="utf-8") as f:
+            self.assertEqual([t["id"] for t in json.load(f)["templates"]], ["our-setup"])
+        self.assert_board_untouched()
+
+    def test_a_file_holds_a_limited_number(self):
+        data = self.on_disk()
+        data["templates"] = [plain_template(id=f"t{n}", name=f"T{n}") for n in range(schema.MAX_TEMPLATES)]
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaises(StoreError) as caught:
+            self.store.save_template(self.board, "One more")
+        self.assertIn(f"at most {schema.MAX_TEMPLATES} saved templates", str(caught.exception))
+
+
 def import_like(shape):
-    """What the store does with an import dict, reduced to what these tests need: ids for everything, then keys for cards."""
-    board = {"name": shape["name"], "description": shape["description"], "prefix": shape["prefix"], "groupLabel": shape["groupLabel"],
-             "checklists": copy.deepcopy(shape["checklists"]), "template": list(shape["template"])}
-
-    def ided(items, **extra):
-        out, used = [], set()
-        for item in items:
-            made = {**item, "id": slug(item["name"], used)}
-            used.add(made["id"])
-            out.append({**made, **extra})
-        return out
-
-    board["columns"] = ided(shape["columns"])
-    board["groups"] = ided(shape["groups"])
-    board["labels"] = ided(shape["labels"])
-    board["views"] = ided(shape["views"])
-    board["properties"] = P.clean_definitions({"properties": [], "cards": []}, shape["properties"])
-    pseudo = {"properties": board["properties"]}
-    by_name = {key: {x["name"].casefold(): x["id"] for x in board[key]} for key in ("columns", "groups", "labels", "views")}
-    settings = shape.get("settings") or {}
-    board["settings"] = {
-        "cardFace": [part if part in PARTS else P.find_property(pseudo, part)["id"] for part in settings.get("cardFace", [])],
-        "limitPolicy": settings.get("limitPolicy", "warn"),
-        "defaultView": by_name["views"][settings["defaultView"].casefold()] if settings.get("defaultView") else None}
-    cards = []
-    for n, raw in enumerate(shape["cards"], 1):
-        card = {"key": f"{shape['prefix']}-{n}", "title": raw["title"], "column": by_name["columns"][raw["column"].casefold()],
-                "rank": n, "archived": None, "notes": "", "labels": [], "properties": {}, "tasks": []}
-        if raw.get("group"):
-            card["group"] = by_name["groups"][raw["group"].casefold()]
-        for part in ("summary", "blocked", "fields", "sections", "checks"):
-            if part in raw:
-                card[part] = copy.deepcopy(raw[part])
-        card["labels"] = [by_name["labels"][name.casefold()] for name in raw.get("labels", [])]
-        card["tasks"] = [{"id": f"t{i}", **t} for i, t in enumerate(raw.get("tasks", []), 1)]
-        for key, value in raw.get("properties", {}).items():
-            prop = P.find_property(pseudo, key)
-            card["properties"][prop["id"]] = P.TYPES[prop["type"]].parse_text(value, prop)
-        cards.append(card)
-    board["cards"] = cards
-    return board
+    """The board the store makes from an import dict: a real store, on a file of its own."""
+    with tempfile.TemporaryDirectory() as tmp:
+        return Store(os.path.join(tmp, "boards.json"), starter=False).import_board(copy.deepcopy(shape))
 
 
 if __name__ == "__main__":

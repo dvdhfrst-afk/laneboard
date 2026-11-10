@@ -136,5 +136,58 @@ class Search(ApiCase):
         self.assertEqual(self.store.get_board(self.board)["rev"], before)
 
 
+class Templates(ApiCase):
+    def test_the_listing(self):
+        listed = self.ok("GET", "/api/templates")["templates"]
+        self.assertEqual([t["id"] for t in listed], ["basic", "software", "personal", "content", "support",
+                                                       "research"])
+        self.assertEqual(set(listed[0]), {"id", "name", "description", "builtIn", "columns", "cards"})
+        self.assertTrue(all(t["builtIn"] for t in listed))
+
+    def test_a_board_from_a_template(self):
+        board = self.ok("POST", "/api/boards", {"name": "Chores", "template": "personal"}, 201)["board"]
+        self.assertEqual(board["name"], "Chores")
+        self.assertTrue(board["cards"])
+        by_name = self.ok("POST", "/api/boards", {"name": "", "template": "Software team"}, 201)["board"]
+        self.assertEqual(by_name["name"], "Software team")
+        status, payload = self.request("POST", "/api/boards", {"name": "X", "template": "weekly"})
+        self.assertEqual(status, 404)
+        self.assertIn("There's no template called weekly.", payload["error"])
+        status, payload = self.request("POST", "/api/boards", {"name": "X", "template": 3})
+        self.assertEqual((status, payload), (400, {"error": "Say which template to use by its id or name."}))
+        self.assertEqual(len(self.store.list_boards()), 2)
+
+    def test_saving_renaming_and_deleting(self):
+        board = self.ok("POST", "/api/boards", {"name": "Work", "template": "software"}, 201)["board"]
+        saved = self.ok("POST", "/api/templates", {"board": board["id"], "name": "Our setup", "cards": True}, 201)
+        self.assertEqual(saved, {"template": {"id": "our-setup", "name": "Our setup", "description": "", "builtIn": False,
+                                              "columns": 5, "cards": 5}})
+        bare = self.ok("POST", "/api/templates", {"board": board["id"], "name": "Bare", "description": "Columns only"}, 201)
+        self.assertEqual((bare["template"]["cards"], bare["template"]["description"]), (0, "Columns only"))
+        changed = self.ok("PATCH", "/api/templates/our-setup", {"name": "Our team", "description": "Ours"})
+        self.assertEqual((changed["template"]["id"], changed["template"]["name"]), ("our-setup", "Our team"))
+        self.assertEqual(self.ok("DELETE", "/api/templates/bare"), {"deleted": "bare"})
+        self.assertEqual([t["id"] for t in self.ok("GET", "/api/templates")["templates"]][-1:], ["our-setup"])
+        self.assertEqual(self.store.get_board(board["id"])["rev"], board["rev"], "no board changes")
+
+    def test_refusals(self):
+        board = self.store.create_board("Work")["id"]
+        for method, path, body, status, phrase in (
+                ("POST", "/api/templates", {"board": board, "name": "X", "colour": 1}, 400, "not colour"),
+                ("POST", "/api/templates", {"name": "X"}, 400, "Say which board"),
+                ("POST", "/api/templates", {"board": "b-nothere", "name": "X"}, 404, "doesn't exist"),
+                ("POST", "/api/templates", {"board": board, "name": "basic"}, 409, "already a template called Basic"),
+                ("POST", "/api/templates", {"board": board, "name": "X", "cards": 1}, 400, "cards must be true or false"),
+                ("PATCH", "/api/templates/basic", {"name": "Mine"}, 409, "built-in template"),
+                ("DELETE", "/api/templates/software", None, 409, "built-in template"),
+                ("DELETE", "/api/templates/nope", None, 404, "no saved template"),
+                ("PATCH", "/api/templates/Not_An_Id", {"name": "Mine"}, 404, "")):
+            with self.subTest(method=method, path=path, body=body):
+                got, payload = self.request(method, path, body)
+                self.assertEqual(got, status, payload)
+                self.assertIn(phrase, payload["error"])
+        self.assertEqual(self.store.saved_templates(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

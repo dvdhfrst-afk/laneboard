@@ -11,6 +11,7 @@ import copy
 import os
 
 from .. import properties as props
+from ..query import broken_views
 from ..schema import (CARD_FACE_PARTS, COLORS, ID_RE, LIMIT_POLICIES, LINK_RE, MAX_CARD_LABELS, MAX_CARDS,
                       MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
                       MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME,
@@ -304,6 +305,11 @@ def template_from_board(board, name, description="", include_cards=False, taken_
     """
     name = text(name, "The template name", MAX_NAME, required=True)
     description = text(description, "The template description", MAX_SUMMARY)
+    broken = broken_views(board)  # a template with a view that can't be read would make no board
+    if broken:
+        view, error = broken[0]
+        raise StoreError(f"That board can't be saved as a template: its saved view \"{props._shown(view['name'])}\" "
+                         f"doesn't work any more. {error} Change or remove that view first.")
     template = {"id": slug(name, set(taken_ids) | set(BUILTIN_IDS)), "name": name, "description": description,
                 "board": _structure(board), "cards": _starter_cards(board) if include_cards else []}
     try:

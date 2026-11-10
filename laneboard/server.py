@@ -20,6 +20,7 @@ from . import __version__, samples, storage
 from .query import QueryError, run, search_boards
 from .schema import SCHEMA_VERSION, slug
 from .store import Store, StoreError
+from .templates import describe
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY = 4_000_000
@@ -40,6 +41,7 @@ INTERNAL_ERROR = ("Laneboard hit an internal error and this request didn't finis
 BOARD = r"(?P<board>[\w-]+)"
 KEY = r"(?P<key>[A-Z][A-Z0-9]*-\d+)"
 TASK = r"(?P<task>[a-z0-9][a-z0-9-]{0,39})"
+TEMPLATE = r"(?P<template>[a-z0-9][a-z0-9-]{0,39})"
 
 ROUTES = [
     ("GET", re.compile(r"/api/health"), "health"),
@@ -48,6 +50,10 @@ ROUTES = [
     ("GET", re.compile(r"/api/export"), "export_all"),
     ("POST", re.compile(r"/api/import"), "import_file"),
     ("GET", re.compile(r"/api/search"), "search_all"),
+    ("GET", re.compile(r"/api/templates"), "list_templates"),
+    ("POST", re.compile(r"/api/templates"), "save_template"),
+    ("PATCH", re.compile(rf"/api/templates/{TEMPLATE}"), "update_template"),
+    ("DELETE", re.compile(rf"/api/templates/{TEMPLATE}"), "delete_template"),
     ("GET", re.compile(r"/api/samples"), "list_samples"),
     ("POST", re.compile(r"/api/samples/(?P<name>[a-z0-9-]+)"), "add_sample"),
     ("GET", re.compile(rf"/api/boards/{BOARD}"), "get_board"),
@@ -244,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_create_board(self):
         body = self._body()
-        return 201, {"board": self.store.create_board(body.get("name"), body.get("description", ""))}
+        return 201, {"board": self.store.create_board(body.get("name"), body.get("description"), template=body.get("template"))}
 
     def api_get_board(self, board):
         return 200, {"board": self.store.get_board(board)}
@@ -316,6 +322,27 @@ class Handler(BaseHTTPRequestHandler):
         results = search_boards(self.store.all_data()["boards"], text, sort, archived)
         return 200, {"results": [{"board": b["id"], "name": b["name"], "keys": keys, "total": considered}
                                  for b, keys, considered in results]}
+
+    def api_list_templates(self):
+        return 200, {"templates": self.store.list_templates()}
+
+    def api_save_template(self):
+        body = self._body()
+        unknown = set(body) - {"board", "name", "description", "cards"}
+        if unknown:
+            raise HttpError(400, f"Saving a template takes board, name, description and cards, not {', '.join(sorted(unknown))}.")
+        board = body.get("board")
+        if not isinstance(board, str) or not board:
+            raise HttpError(400, "Say which board to save as a template, as board: its id.")
+        template = self.store.save_template(board, body.get("name"), body.get("description"), body.get("cards", False))
+        return 201, {"template": describe(template)}
+
+    def api_update_template(self, template):
+        return 200, {"template": describe(self.store.update_template(template, self._body()))}
+
+    def api_delete_template(self, template):
+        self.store.delete_template(template)
+        return 200, {"deleted": template}
 
     def api_list_samples(self):
         return 200, {"samples": samples.list_samples()}

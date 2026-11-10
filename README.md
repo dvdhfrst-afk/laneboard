@@ -61,6 +61,21 @@ look around. You can also add one from the command line:
 laneboard sample garden
 ```
 
+To start a board of your own already set up, use a template. It brings columns, labels, properties,
+saved views and a few example cards to change or delete. List the templates, then make a board from
+one:
+
+```bash
+laneboard templates
+```
+
+```bash
+laneboard new "Chores" --template personal
+```
+
+Once a board is set up the way you like, `laneboard templates save "Chores" "My chores"` keeps its
+setup as a template of your own (add `--cards` to keep its cards too).
+
 Press `n` to add a card. Click a card to open it, and type in **Notes**; they save as you type. Drag
 the card to another column. **Board settings** changes the columns and adds groups. Press `?` at any
 time to see the keyboard shortcuts and where your data is.
@@ -199,7 +214,10 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard delete BOARD KEY --yes` | Delete a card for good |
 | `laneboard task BOARD KEY` | List a card's tasks. `--add TEXT`, `--done N`, `--reopen N`, `--remove N`, counting from 1 |
 | `laneboard transfer BOARD KEY TARGET_BOARD` | Move a card to another board. `--column` |
-| `laneboard new NAME` | Make a board. `--description` |
+| `laneboard new NAME` | Make a board. `--description`, `--template T` to start from a template |
+| `laneboard templates` | List the templates. `--json` |
+| `laneboard templates save BOARD NAME` | Keep a board's setup as a template. `--cards` keeps its cards too (without notes), `--description` |
+| `laneboard templates delete NAME --yes` | Delete a template you saved |
 | `laneboard labels BOARD` | List labels. `--add NAME` (with `--color`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard properties BOARD` | List properties. `--add NAME --type TYPE` (with `--choices`, `--min`, `--max`, `--decimals`, `--unit`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard views BOARD` | List saved views. `--add NAME --query Q` (with `--sort`), `--remove NAME`, `--default NAME` or `none` |
