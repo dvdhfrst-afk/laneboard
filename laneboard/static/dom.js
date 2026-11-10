@@ -30,6 +30,12 @@ export function groupTag(g) {
   return h("span", { class: "grp" }, h("span", { class: `dot c-${g.color}` }), g.name);
 }
 
+// A colored chip with its name in it, for labels and property choices. The name is always there: color alone
+// doesn't say anything to everyone.
+export function chip(name, color, extra = "") {
+  return h("span", { class: `chip c-${color}${extra ? " " + extra : ""}` }, h("span", { class: `dot c-${color}`, "aria-hidden": "true" }), name);
+}
+
 export function groupLink(g) {
   return g.link && isWebLink(g.link) ? h("a", { href: g.link, target: "_blank", rel: "noopener noreferrer" }, groupTag(g)) : groupTag(g);
 }
@@ -195,6 +201,7 @@ export function confirmBox(anchor, message, label, run) {
       go.disabled = true;
       try {
         await run();
+        box.remove();
       } catch (e) {
         err.textContent = e.message;
         go.disabled = false;
@@ -210,4 +217,44 @@ export function sheetHead(title, key, ...buttons) {
   return h("div", { class: "sheet-head" },
     h("div", { class: "sheet-title" }, key && h("div", { class: "key", text: key }), h("h2", { id: "sheet-title", text: title })),
     h("div", { class: "actions" }, buttons, h("button", { type: "button", text: "Close", onclick: () => closeSheet() })));
+}
+
+// A choice the person has to make, like which of two versions to keep: a message and a button for each way.
+// While it shows, `box` holds buttons, which is how callers tell it's waiting for an answer.
+export function offer(box, message, ...choices) {
+  box.replaceChildren(h("span", { text: message }), ...choices.map(([label, run]) => h("button", {
+    type: "button", text: label, onclick: () => { box.replaceChildren(); run(); } })));
+}
+
+// Tabs over panels: [{id, label, panel}]. Left and Right go between tabs, as tabs usually do.
+export function tabs(list, { onSelect = null } = {}) {
+  const buttons = list.map((t, i) => h("button", {
+    type: "button", role: "tab", id: `tab-${t.id}`, "aria-controls": `panel-${t.id}`, "aria-selected": String(i === 0),
+    tabIndex: i === 0 ? 0 : -1, text: t.label, onclick: () => select(t.id) }));
+  list.forEach((t, i) => {
+    t.panel.id = `panel-${t.id}`;
+    t.panel.hidden = i > 0;
+    t.panel.setAttribute("role", "tabpanel");
+    t.panel.setAttribute("aria-labelledby", `tab-${t.id}`);
+  });
+  const select = (id, focus = false) => {
+    list.forEach((t, i) => {
+      const on = t.id === id;
+      t.panel.hidden = !on;
+      buttons[i].setAttribute("aria-selected", String(on));
+      buttons[i].tabIndex = on ? 0 : -1;
+      if (on && focus) buttons[i].focus();
+    });
+    onSelect?.(id);
+  };
+  const bar = h("div", { class: "tabs", role: "tablist" }, buttons);
+  bar.addEventListener("keydown", (e) => {
+    const at = buttons.indexOf(document.activeElement);
+    if (at < 0) return;
+    const to = e.key === "ArrowRight" ? at + 1 : e.key === "ArrowLeft" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : null;
+    if (to === null) return;
+    e.preventDefault();
+    select(list[(to + buttons.length) % buttons.length].id, true);
+  });
+  return { bar, select };
 }

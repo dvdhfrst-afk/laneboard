@@ -1,14 +1,16 @@
 // Drawing the open board: the header, the columns and the cards on them, the groups table, and what an empty page offers.
 
-import { activeCards, cardsIn, groupOf, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
+import { activeCards, cardsIn, groupOf, index, reindex, setBoard, state, store, stored, syncListEntry } from "./state.js";
 import { countBy, plural } from "./util.js";
 import { $, groupLink, groupTag, h, rich } from "./dom.js";
 import { renderMenu } from "./menu.js";
-import { matches, queryWords, renderFilters } from "./search.js";
+import { filtering, matches, queryWords, renderFilters } from "./search.js";
 import { openCard, progress } from "./card.js";
 import { openCardForm } from "./cardform.js";
 import { openNewBoard, startingPoints } from "./settings.js";
 import { chooseImportFile } from "./transfer.js";
+import { labelChips } from "./labels.js";
+import { propFace } from "./properties.js";
 
 const COLUMN_PAGE = 300;   // cards drawn per column before a "show more" button; keeps huge boards quick
 const COLLAPSED = "laneboard:collapsed:";
@@ -104,18 +106,22 @@ export function renderColumns() {
   }
   const scroll = new Map([...main.querySelectorAll(".col")].map((c) => [c.dataset.col, c.scrollTop]));
   const words = queryWords();
-  const filtering = state.groups.size > 0 || state.blockedOnly || words.length > 0;
+  const narrowed = filtering(words);
   const collapsed = collapsedColumns();
+  const face = faceParts();
+  const refuse = b.settings.limitPolicy === "refuse";
   main.style.gridTemplateColumns = b.columns.map((c) => (collapsed.has(c.id) ? "minmax(130px, 150px)" : "minmax(230px, 1fr)")).join(" ");
   let matched = 0;
   let total = 0;
   const columns = b.columns.map((col) => {
     const all = cardsIn(col.id);
-    const shown = filtering ? all.filter((c) => matches(c, words)) : all;
+    const shown = narrowed ? all.filter((c) => matches(c, words)) : all;
     total += all.length;
     matched += shown.length;
     const over = col.limit && all.length > col.limit;
+    const full = refuse && col.limit && all.length >= col.limit;
     const closed = collapsed.has(col.id);
+    const note = state.columnNote?.column === col.id ? state.columnNote.message : "";
     const limit = state.shown.get(col.id) || COLUMN_PAGE;
     const drawn = shown.length > limit ? shown.slice(0, limit) : shown;
     return h("section", { class: closed ? "col collapsed" : "col", "data-col": col.id, "aria-label": col.name },
@@ -124,12 +130,14 @@ export function renderColumns() {
           "aria-label": `${closed ? "Show" : "Hide"} the cards in ${col.name}`, text: closed ? "▸" : "▾", onclick: () => toggleCollapsed(col.id) }),
         h("h2", { text: col.name }),
         h("div", { class: "right" },
-          h("span", { class: over ? "count over" : "count", title: col.limit ? `Limit ${col.limit}` : null,
-            text: filtering ? `${shown.length} of ${all.length}` : col.limit ? `${all.length} / ${col.limit}` : String(all.length) }),
+          h("span", { class: over ? "count over" : full ? "count full" : "count",
+            title: col.limit ? (full ? `Full: limit ${col.limit}, and this board takes no more cards` : `Limit ${col.limit}`) : null,
+            text: narrowed ? `${shown.length} of ${all.length}` : col.limit ? `${all.length} / ${col.limit}` : String(all.length) }),
           h("button", { type: "button", title: `Add a card to ${col.name}`, "aria-label": `Add a card to ${col.name}`,
             text: "+", onclick: () => openCardForm(null, { column: col.id }) }))),
-      !closed && (drawn.length ? drawn.map(cardEl)
-        : h("div", { class: "empty", text: filtering && all.length ? "No matching cards" : "No cards" })),
+      note && h("div", { class: "col-note", role: "alert", text: note }),
+      !closed && (drawn.length ? drawn.map((card) => cardEl(card, face))
+        : h("div", { class: "empty", text: narrowed && all.length ? "No matching cards" : "No cards" })),
       !closed && shown.length > drawn.length && h("button", {
         type: "button", class: "more", text: `Show ${Math.min(COLUMN_PAGE, shown.length - drawn.length)} more of ${shown.length - drawn.length}`,
         onclick: () => { state.shown.set(col.id, limit + COLUMN_PAGE); renderColumns(); },
@@ -141,7 +149,7 @@ export function renderColumns() {
   }
   settleFocus(main);
   const count = $("#search-count");
-  count.textContent = words.length || state.groups.size || state.blockedOnly ? `${matched} of ${plural(total, "card")}` : "";
+  count.textContent = narrowed ? `${matched} of ${plural(total, "card")}` : "";
 }
 
 // Only one card is a tab stop; arrow keys go between cards. Otherwise a big board takes a thousand Tab presses to cross.
@@ -156,11 +164,36 @@ function settleFocus(main) {
   state.wantFocus = false;
 }
 
+// What a card shows under its title, in the board's order (settings.cardFace): each entry is a function of
+// the card giving a node, or nothing when the card has nothing to show for it.
+function faceParts() {
+  const parts = {
+    group: (card) => {
+      const g = groupOf(card);
+      return g && groupTag(g);
+    },
+    labels: (card) => card.labels.length > 0 && labelChips(card.labels),
+    field: (card) => {
+      const first = card.fields.find((f) => f.value);
+      return first && h("span", { class: "first-field", text: first.value });
+    },
+    progress: (card) => {
+      const p = progress(card);
+      const what = p.ticks && p.tasks ? "Checklist lines ticked and tasks done" : p.tasks ? "Tasks done" : "Checklist lines ticked";
+      return p.total > 0 && h("span", { class: `ticks${p.done === p.total ? " all" : ""}`, title: what, text: `${p.done}/${p.total}` });
+    },
+    blocked: (card) => card.blocked && h("span", { class: "flag", text: "Blocked" }),
+  };
+  return state.board.settings.cardFace.map((part) => {
+    if (parts[part]) return parts[part];
+    const prop = index.props.get(part);
+    return prop ? (card) => propFace(prop, card.properties[prop.id]) : null;
+  }).filter(Boolean);
+}
+
 // A card as it shows in a column.
-function cardEl(card) {
-  const g = groupOf(card);
-  const first = card.fields.find((f) => f.value);
-  const ticks = progress(card);
+function cardEl(card, face) {
+  const meta = face.map((part) => part(card)).filter(Boolean);
   return h("a", {
     class: "card", href: `#${state.board.id}/${card.key}`, draggable: true, "data-key": card.key, tabIndex: -1,
     onclick: (e) => {
@@ -171,12 +204,7 @@ function cardEl(card) {
   },
   h("span", { class: "key", text: card.key }),
   h("span", { class: "title", text: card.title }),
-  (g || first || card.blocked || ticks.total > 0) && h("span", { class: "meta" },
-    g && groupTag(g),
-    first && h("span", { class: "first-field", text: first.value }),
-    ticks.total > 0 && h("span", { class: `ticks${ticks.done === ticks.total ? " all" : ""}`,
-      title: "Checklist lines ticked", text: `${ticks.done}/${ticks.total}` }),
-    card.blocked && h("span", { class: "flag", text: "Blocked" })));
+  meta.length > 0 && h("span", { class: "meta" }, meta));
 }
 
 function renderGroups() {

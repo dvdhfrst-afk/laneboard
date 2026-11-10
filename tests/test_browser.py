@@ -986,5 +986,562 @@ class LongSession(BrowserCase):
                 json.dump({"steps": self.STEPS, "cards": len(expected), "actions": counts}, f, indent=1, sort_keys=True)
 
 
+
+def parts_board(name="Parts", cards=3):
+    """A board with labels, a property of every type, a limited column and a checklist."""
+    return {
+        "name": name,
+        "prefix": "T",
+        "groupLabel": "Area",
+        "columns": ["Backlog", {"name": "Doing", "limit": 1}, "Done"],
+        "labels": [{"name": "Bug", "color": "rose"}, {"name": "Docs", "color": "blue"}, {"name": "Quick", "color": "green"}],
+        "properties": [
+            {"name": "Points", "type": "number", "min": 0, "max": 100, "decimals": 1, "unit": "pt"},
+            {"name": "Priority", "type": "choice", "choices": ["Low", "Medium", {"name": "High", "color": "rose"}]},
+            {"name": "Platform", "type": "multi", "choices": ["iOS", "Web", "Desktop"]},
+            {"name": "Reviewed", "type": "checkbox"},
+            {"name": "Link", "type": "url"},
+            {"name": "Confidence", "type": "rating", "max": 5},
+            {"name": "Owner", "type": "text"},
+        ],
+        "checklists": [{"name": "Ship", "items": [{"text": "Tests pass"}, {"text": "Signed off"}]}],
+        "cards": [{"key": f"T-{i}", "title": f"Card {i}", "column": "Backlog", "rank": i} for i in range(1, cards + 1)],
+    }
+
+
+class PartsCase(BrowserCase):
+    def open_card(self, page, key):
+        page.click(f'.card[data-key="{key}"]')
+        page.wait_for_selector("#card-notes")
+
+    def close_sheet(self, page):
+        page.click("#sheet >> text=Close")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+    def settings(self, page, tab=None):
+        page.click("#board-settings")
+        page.wait_for_selector("dialog[open] form")
+        if tab:
+            page.click(f"#tab-{tab}")
+
+    def save_settings(self, page):
+        page.click("dialog[open] button[type=submit]")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+    def tab_to(self, page, check, back=False, limit=60):
+        """Press Tab (or Shift+Tab) until `check` holds for the focused element, as someone without a mouse would."""
+        for _ in range(limit):
+            if page.evaluate(f"(() => {{ const el = document.activeElement; return !!({check}); }})()"):
+                return
+            page.keyboard.press("Shift+Tab" if back else "Tab")
+        self.fail(f"Tab never reached {check}")
+
+    def value(self, key, prop):
+        return self.app.card(key)["properties"].get(prop)
+
+
+class Labels(PartsCase):
+    def test_labels_show_as_chips_with_their_names(self):
+        b = parts_board()
+        b["cards"][0]["labels"] = ["Docs", "Bug"]
+        page = self.start(b)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').all_inner_texts(), ["Bug", "Docs"], "in the board's order")
+        self.open_card(page, "T-1")
+        self.assertEqual(page.locator("#sheet .labels-sec .chip").all_inner_texts(), ["Bug", "Docs"])
+        self.assertIn("c-rose", page.get_attribute("#sheet .labels-sec .chip >> nth=0", "class"))
+
+    def test_add_and_take_off_labels_in_the_card_view(self):
+        page = self.start(parts_board())
+        self.open_card(page, "T-1")
+        page.click("#card-labels")
+        page.click(".picker >> text=Docs")
+        page.click(".picker >> text=Bug")
+        self.wait_until(lambda: self.app.card("T-1")["labels"] == ["bug", "docs"], "both labels to save")
+        page.click(".picker >> text=Bug")
+        self.wait_until(lambda: self.app.card("T-1")["labels"] == ["docs"], "the label to come off")
+        page.fill(".picker-search", "qu")
+        self.assertEqual(page.locator(".picker-list .chip").all_inner_texts(), ["Quick"], "the search narrows the list")
+        page.click(".picker >> text=Done")
+        self.close_sheet(page)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').all_inner_texts(), ["Docs"])
+
+    def test_make_a_label_from_the_picker(self):
+        page = self.start(parts_board())
+        self.open_card(page, "T-2")
+        page.click("#card-labels")
+        page.fill(".picker-search", "Needs design")
+        page.click("text=Make the label \"Needs design\"")
+        self.wait_until(lambda: self.app.card("T-2")["labels"] == ["needs-design"], "the new label to go on the card")
+        self.assertEqual([lab["name"] for lab in self.app.board()["labels"]], ["Bug", "Docs", "Quick", "Needs design"])
+        self.assertEqual(page.locator("#sheet .labels-sec .label-line .chip").all_inner_texts(), ["Needs design"])
+
+    def test_label_picker_by_keyboard_only(self):
+        page = self.start(parts_board())
+        page.keyboard.press("Tab")
+        self.tab_to(page, "el.dataset.key === 'T-1'")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#card-notes")
+        self.tab_to(page, "el.id === 'card-labels'")
+        page.keyboard.press("Enter")
+        self.until(page, "document.activeElement.classList.contains('picker-search')")
+        page.keyboard.type("do")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Space")
+        self.wait_until(lambda: self.app.card("T-1")["labels"] == ["docs"], "Docs to be ticked")
+        page.keyboard.press("ArrowUp")
+        page.keyboard.press("Escape")  # clears the search
+        self.assertEqual(page.input_value(".picker-search"), "")
+        page.keyboard.type("quick")
+        page.keyboard.press("Enter")  # ticks the first match
+        self.wait_until(lambda: self.app.card("T-1")["labels"] == ["docs", "quick"], "Quick to be ticked")
+        page.keyboard.type("Later")
+        page.keyboard.press("Enter")  # no match, so it makes the label
+        self.wait_until(lambda: self.app.card("T-1")["labels"] == ["docs", "quick", "later"], "the new label")
+        page.keyboard.press("Escape")  # closes the picker, not the card
+        self.until(page, "!document.querySelector('.picker') && document.activeElement.id === 'card-labels'")
+        self.assertTrue(page.evaluate("document.querySelector('#sheet').open"))
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+    def test_labels_in_the_card_form(self):
+        page = self.start(parts_board())
+        page.click("#new-card")
+        page.fill("dialog[open] input", "With a label")
+        page.click("#form-labels")
+        page.click(".picker >> text=Bug")
+        page.keyboard.press("Enter")  # in the picker, Enter ticks and unticks, and doesn't send the form
+        self.assertFalse(page.is_checked(".picker input[data-id=bug]"))
+        page.keyboard.press("Enter")
+        self.assertTrue(page.is_checked(".picker input[data-id=bug]"))
+        self.assertTrue(page.evaluate("!!document.querySelector('dialog[open] form')"))
+        page.click(".picker >> text=Done")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector("#card-notes")
+        self.assertEqual(self.app.card("T-4")["labels"], ["bug"])
+        page.click("#sheet >> text=Edit")
+        page.click("#form-labels")
+        page.click(".picker >> text=Bug")
+        page.click(".picker >> text=Quick")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector("#card-notes")
+        self.assertEqual(self.app.card("T-4")["labels"], ["quick"])
+
+    def test_label_filter(self):
+        b = parts_board()
+        b["cards"][0]["labels"] = ["Bug"]
+        b["cards"][1]["labels"] = ["Docs"]
+        page = self.start(b)
+        self.assertEqual(page.locator("#filters .label-filter").count(), 2, "only labels in use")
+        page.click("#filters .label-filter:has-text('Bug')")
+        self.assertEqual(self.column_keys(page, "backlog"), ["T-1"])
+        self.assertIn("1 of 3", page.locator("#search-count").inner_text())
+        page.click("#filters .label-filter:has-text('Docs')")
+        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-2"], "either label")
+        page.click("#filters >> text=Show all")
+        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-2", "T-3"])
+
+
+class Properties(PartsCase):
+    def test_each_type_saves_in_place_and_shows_on_the_card(self):
+        b = parts_board()
+        b["settings"] = {"cardFace": ["labels", "Points", "Priority", "Platform", "Reviewed", "Link", "Confidence", "Owner"]}
+        page = self.start(b)
+        self.open_card(page, "T-1")
+        page.fill("#prop-points", "2.25")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.value("T-1", "points") == 2.3, "the number, rounded")
+        self.until(page, "document.querySelector('#prop-points').value === '2.3'")
+        page.click("#prop-priority >> text=High")
+        page.click("#prop-platform >> text=iOS")
+        page.click("#prop-platform >> text=Web")
+        page.check("#prop-reviewed")
+        page.fill("#prop-link", "https://example.test/spec")
+        page.keyboard.press("Enter")
+        page.click("#prop-confidence label.star >> nth=3")
+        page.fill("#prop-owner", "Sam")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.app.card("T-1")["properties"] == {
+            "points": 2.3, "priority": "high", "platform": ["ios", "web"], "reviewed": True,
+            "link": "https://example.test/spec", "confidence": 4, "owner": "Sam"}, "every value to save")
+        self.assertEqual(page.get_attribute("#sheet .open-link", "href"), "https://example.test/spec")
+        self.assertEqual(page.get_attribute("#sheet .open-link", "rel"), "noopener noreferrer")
+        self.assertIn("4 of 5", page.locator("#prop-confidence").inner_text())
+        self.close_sheet(page)
+        face = " ".join(page.locator('.card[data-key="T-1"] .meta').inner_text().split())
+        for part in ("Points 2.3 pt", "Priority High", "Platform iOS Web", "✓ Reviewed", "Link example.test", "4 out of 5", "Owner Sam"):
+            self.assertIn(part, face)
+        self.assertEqual(page.locator('.card[data-key="T-1"] a').count(), 0, "no link inside the card's own link")
+        self.open_card(page, "T-1")
+        page.fill("#prop-points", "")
+        page.keyboard.press("Enter")
+        page.click("#prop-priority >> text=None")
+        page.click("#prop-confidence >> text=Clear")
+        self.wait_until(lambda: not {"points", "priority", "confidence"} & set(self.app.card("T-1")["properties"]), "the values to clear")
+
+    def test_the_server_says_what_is_wrong_next_to_the_value(self):
+        page = self.start(parts_board())
+        self.open_card(page, "T-1")
+        page.fill("#prop-points", "500")
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".prop-msg:has-text('Points must be a number from 0 to 100')")
+        self.assertEqual(page.input_value("#prop-points"), "500", "what was typed stays")
+        page.fill("#prop-link", "example.test")
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".prop-msg:has-text('Link must be a link starting with http')")
+        self.assertEqual(self.app.card("T-1")["properties"], {})
+        page.fill("#prop-points", "5")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.value("T-1", "points") == 5, "a good value to save")
+
+    def test_two_tabs_conflict_on_a_property_value(self):
+        a = self.start(parts_board())
+        b = self.open_page()
+        self.open_card(a, "T-1")
+        self.open_card(b, "T-1")
+        a.fill("#prop-points", "3")
+        a.keyboard.press("Enter")
+        self.wait_until(lambda: self.value("T-1", "points") == 3, "the first tab's value")
+        b.fill("#prop-points", "5")
+        b.keyboard.press("Enter")
+        b.wait_for_selector(".prop-msg:has-text('also changed somewhere else, to 3 pt')")
+        self.assertEqual(self.value("T-1", "points"), 3, "nothing is overwritten without asking")
+        self.assertEqual(b.input_value("#prop-points"), "5")
+        b.click("text=Keep mine")
+        self.wait_until(lambda: self.value("T-1", "points") == 5, "the kept value")
+        self.poll(a)
+        self.until(a, "document.querySelector('#prop-points').value === '5'")  # the quiet tab follows
+        a.fill("#prop-points", "7")
+        a.keyboard.press("Enter")
+        self.wait_until(lambda: self.value("T-1", "points") == 7, "the first tab again")
+        b.fill("#prop-points", "9")
+        b.keyboard.press("Enter")
+        b.wait_for_selector(".prop-msg:has-text('also changed somewhere else')")
+        b.click("text=Use the other")
+        self.assertEqual(b.input_value("#prop-points"), "7")
+        self.assertEqual(self.value("T-1", "points"), 7)
+
+    def test_properties_in_the_card_form(self):
+        page = self.start(parts_board())
+        page.click("#new-card")
+        page.fill("dialog[open] input", "With values")
+        page.fill("#form-prop-points", "lots")
+        page.click("#form-prop-priority >> text=Low")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector(".form-error:has-text('Points must be a number')")
+        self.assertEqual(page.input_value("#form-prop-points"), "lots")
+        page.fill("#form-prop-points", "4")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector("#card-notes")
+        self.assertEqual(self.app.card("T-4")["properties"], {"points": 4, "priority": "low"})
+        page.click("#sheet >> text=Edit")
+        self.assertEqual(page.input_value("#form-prop-points"), "4")
+        page.click("#form-prop-priority >> text=None")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector("#card-notes")
+        self.assertEqual(self.app.card("T-4")["properties"], {"points": 4})
+
+
+class Tasks(PartsCase):
+    def task_texts(self, key="T-1"):
+        return [t["text"] for t in self.app.card(key)["tasks"]]
+
+    def test_add_tick_reword_reorder_and_remove(self):
+        page = self.start(parts_board())
+        self.open_card(page, "T-1")
+        for text in ("First", "Second", "Third"):
+            page.fill("#task-new", text)
+            page.keyboard.press("Enter")
+        self.wait_until(lambda: self.task_texts() == ["First", "Second", "Third"], "three tasks")
+        self.until(page, "document.querySelectorAll('.task[data-id]:not([data-id=\"\"])').length === 3")
+        page.locator(".task >> nth=0").locator("input[type=checkbox]").check()
+        self.wait_until(lambda: self.app.card("T-1")["tasks"][0]["done"], "the tick")
+        page.locator(".task-text >> nth=1").fill("Second, reworded")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.task_texts()[1] == "Second, reworded", "the new wording")
+        page.locator(".task >> nth=2").locator("button[aria-label='Move up']").click()
+        self.wait_until(lambda: self.task_texts() == ["First", "Third", "Second, reworded"], "the new order")
+        page.locator(".task >> nth=0").locator("button[aria-label='Remove task']").click()
+        self.wait_until(lambda: self.task_texts() == ["Third", "Second, reworded"], "the task to go")
+        self.assertIn("0/2", page.locator(".tasks h3").inner_text())
+        self.close_sheet(page)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .ticks').inner_text(), "0/4", "two checklist lines and two tasks")
+
+    def test_task_list_by_keyboard_only(self):
+        page = self.start(parts_board())
+        page.keyboard.press("Tab")
+        self.tab_to(page, "el.dataset.key === 'T-1'")
+        page.keyboard.press("Enter")
+        page.wait_for_selector("#card-notes")
+        self.tab_to(page, "el.id === 'task-new'")
+        for text in ("One", "Two", "Three"):
+            page.keyboard.type(text)
+            page.keyboard.press("Enter")
+        self.wait_until(lambda: self.task_texts() == ["One", "Two", "Three"], "three tasks")
+        self.until(page, "[...document.querySelectorAll('.task-text')].every((t) => !t.readOnly)")
+        self.tab_to(page, "el.classList.contains('task-text') && el.value === 'Three'", back=True)
+        page.keyboard.press("Alt+ArrowUp")
+        page.keyboard.press("Alt+ArrowUp")
+        self.wait_until(lambda: self.task_texts() == ["Three", "One", "Two"], "Three to move to the top")
+        self.assertEqual(page.evaluate("document.activeElement.value"), "Three", "focus moves with the task")
+        page.keyboard.press("Shift+Tab")
+        page.keyboard.press("Space")
+        self.wait_until(lambda: self.app.card("T-1")["tasks"][0]["done"], "the tick")
+        self.tab_to(page, "el.getAttribute('aria-label') === 'Remove task'")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.task_texts() == ["One", "Two"], "the task to go")
+        self.assertEqual(page.evaluate("document.activeElement.value"), "One", "focus goes to the next task")
+        page.keyboard.press("Control+a")
+        page.keyboard.type("Uno")
+        page.keyboard.press("Enter")
+        self.wait_until(lambda: self.task_texts() == ["Uno", "Two"], "the new wording")
+        page.keyboard.type(" and more")
+        page.keyboard.press("Escape")  # puts back the saved text and keeps the card open
+        self.assertEqual(page.evaluate("document.activeElement.value"), "Uno")
+        self.assertTrue(page.evaluate("document.querySelector('#sheet').open"))
+        page.keyboard.press("Escape")
+        self.until(page, "!document.querySelector('#sheet').open")
+
+    def test_progress_on_the_card_face_counts_ticks_and_tasks(self):
+        b = parts_board()
+        b["cards"][0]["tasks"] = [{"text": "Done one", "done": True}, "Open one"]
+        b["cards"][1]["tasks"] = ["Only a task"]
+        b["checklists"] = []
+        page = self.start(b)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .ticks').inner_text(), "1/2")
+        self.assertEqual(page.get_attribute('.card[data-key="T-1"] .ticks', "title"), "Tasks done")
+        self.assertEqual(page.locator('.card[data-key="T-3"] .ticks').count(), 0)
+
+
+class MoveToBoard(PartsCase):
+    def boards(self, target_limit=None):
+        source = parts_board()
+        source["cards"][0].update(labels=["Bug", "Docs"], properties={"Points": 3, "Priority": "High"}, notes="kept")
+        target = {"name": "Other", "prefix": "OB", "columns": ["To do", {"name": "Doing", "limit": target_limit}, "Done"],
+                  "labels": ["Bug"], "properties": [{"name": "Points", "type": "number"}],
+                  "cards": [{"title": "Already here", "column": "Doing"}]}
+        if target_limit:
+            target["settings"] = {"limitPolicy": "refuse"}
+        return source, target
+
+    def test_move_a_card_and_follow_it(self):
+        page = self.start(*self.boards())
+        self.open_card(page, "T-1")
+        page.click("#sheet >> text=Move to board")
+        self.until(page, "!document.querySelector('#move-column').disabled")
+        page.select_option("#move-column", label="Doing")
+        page.click(".move-panel >> text=\"Move\"")
+        page.wait_for_selector("#toast:has-text('Moved T-1 to Other as OB-2')")
+        message = self.toast(page)
+        self.assertIn("Label: Docs", message)
+        self.assertIn("Priority: High", message)
+        self.assertNotIn("Points", message)
+        self.assertFalse(page.evaluate("document.querySelector('#sheet').open"))
+        self.assertEqual(page.locator('.card[data-key="T-1"]').count(), 0)
+        page.click("#toast >> text=Go to it")
+        self.until(page, "document.querySelector('#board-name').textContent === 'Other'")
+        page.wait_for_selector("#sheet .key:has-text('OB-2')")
+        self.assertEqual(page.locator("#sheet .labels-sec .chip").all_inner_texts(), ["Bug"])
+        self.assertEqual(page.input_value("#prop-points"), "3")
+        self.assertEqual(page.input_value("#card-notes"), "kept")
+        moved = next(c for c in self.app.board(1)["cards"] if c["key"] == "OB-2")
+        self.assertEqual(moved["column"], "doing")
+
+    def test_a_refusal_keeps_the_choice_and_the_card(self):
+        page = self.start(*self.boards(target_limit=1))
+        self.open_card(page, "T-1")
+        page.click("#sheet >> text=Move to board")
+        self.until(page, "!document.querySelector('#move-column').disabled")
+        page.select_option("#move-column", label="Doing (limit 1)")
+        page.click(".move-panel >> text=\"Move\"")
+        page.wait_for_selector(".move-panel .form-error:has-text('Doing is full')")
+        self.assertEqual(page.input_value("#move-column"), "doing")
+        self.assertEqual(self.app.card("T-1")["title"], "Card 1")
+        page.select_option("#move-column", label="Done")
+        page.click(".move-panel >> text=\"Move\"")
+        page.wait_for_selector("#toast:has-text('Moved T-1 to Other')")
+
+
+class BoardSettingsParts(PartsCase):
+    def test_labels_tab_add_rename_recolor_remove_with_a_count(self):
+        b = parts_board()
+        b["cards"][0]["labels"] = ["Bug", "Docs"]
+        b["cards"][1]["labels"] = ["Bug"]
+        page = self.start(b)
+        self.settings(page, "labels")
+        rows = page.locator(".label-row")
+        rows.nth(1).locator(".l-name").fill("Documentation")
+        rows.nth(2).locator(".l-color").select_option("violet")
+        page.click("text=Add label")
+        page.keyboard.type("Later")
+        rows.nth(0).locator("text=Remove").click()
+        page.wait_for_selector(".confirm:has-text('Bug is on 2 cards')")
+        page.click(".confirm button.danger")
+        self.save_settings(page)
+        labels = self.app.board()["labels"]
+        self.assertEqual([(lab["id"], lab["name"]) for lab in labels], [("docs", "Documentation"), ("quick", "Quick"), ("later", "Later")])
+        self.assertEqual([lab["color"] for lab in labels[:2]], ["blue", "violet"])
+        self.assertEqual(self.app.card("T-1")["labels"], ["docs"])
+        self.assertEqual(self.app.card("T-2")["labels"], [])
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').all_inner_texts(), ["Documentation"])
+
+    def test_properties_tab(self):
+        b = parts_board()
+        b["cards"][0]["properties"] = {"Points": 3, "Link": "https://example.test/"}
+        page = self.start(b)
+        self.settings(page, "properties")
+        defs = page.locator(".prop-def")
+        defs.nth(0).locator(".p-name").fill("Story points")
+        defs.nth(1).locator(".choice-row >> nth=2").locator("button[aria-label='Move choice up']").click()
+        defs.nth(1).locator(".choice-row >> nth=0").locator(".ch-name").fill("Lowest")
+        defs.nth(6).locator("text=Remove").click()  # Owner: no card has a value, so no question
+        defs.nth(4).locator("text=Remove").click()  # Link: one card has a value
+        page.wait_for_selector(".confirm:has-text('Link has a value on 1 card')")
+        page.click(".confirm button.danger")
+        page.click("text=Add property")
+        new = page.locator(".prop-def").last
+        new.locator(".p-name").fill("Size")
+        new.locator(".p-type").select_option("choice")
+        new.locator(".ch-name").fill("S")
+        new.locator("text=Add choice").click()
+        page.keyboard.type("M")
+        page.click("text=Add property")
+        rated = page.locator(".prop-def").last
+        rated.locator(".p-name").fill("Effort")
+        rated.locator(".p-type").select_option("rating")
+        rated.locator(".r-max").select_option("7")
+        self.save_settings(page)
+        props = {p["name"]: p for p in self.app.board()["properties"]}
+        self.assertEqual(list(props), ["Story points", "Priority", "Platform", "Reviewed", "Confidence", "Size", "Effort"])
+        self.assertEqual(props["Story points"]["id"], "points")
+        self.assertEqual([c["name"] for c in props["Priority"]["choices"]], ["Lowest", "High", "Medium"])
+        self.assertEqual([c["name"] for c in props["Size"]["choices"]], ["S", "M"])
+        self.assertEqual(props["Effort"]["max"], 7)
+        self.assertEqual(self.app.card("T-1")["properties"], {"points": 3})
+        # A change the board can't make: the server's reason shows, and the form stays as it was.
+        self.settings(page, "properties")
+        page.locator(".prop-def >> nth=0").locator(".p-type").select_option("checkbox")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector(".form-error:has-text(\"can't change from number to checkbox\")")
+        self.assertEqual(page.locator(".prop-def >> nth=0").locator(".p-type").input_value(), "checkbox")
+        self.assertEqual(self.app.board()["properties"][0]["type"], "number")
+
+    def test_card_face_tab(self):
+        b = parts_board()
+        b["cards"][0].update(labels=["Bug"], properties={"Priority": "High"})
+        page = self.start(b)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').count(), 1)
+        self.settings(page, "face")
+        rows = page.locator(".face-row")
+        rows.filter(has_text="Labels").locator("input").uncheck()
+        priority = rows.filter(has_text="Priority")
+        priority.locator("input").check()
+        for _ in range(8):
+            priority.locator("button[aria-label='Move it up']").click()
+        self.save_settings(page)
+        face = self.app.board()["settings"]["cardFace"]
+        self.assertEqual(face[0], "priority")
+        self.assertNotIn("labels", face)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').count(), 0)
+        self.assertTrue(page.locator('.card[data-key="T-1"] .meta > :first-child').inner_text().startswith("Priority"))
+        # A property added in the same save can be put on the card face straight away.
+        self.settings(page, "properties")
+        page.click("text=Add property")
+        page.locator(".prop-def").last.locator(".p-name").fill("Team")
+        page.click("#tab-face")
+        page.locator(".face-row").filter(has_text="Team").locator("input").check()
+        self.save_settings(page)
+        self.wait_until(lambda: "team" in self.app.board()["settings"]["cardFace"], "the new property on the card face")
+
+    def test_a_full_column_refuses_where_the_card_was_going(self):
+        b = parts_board()
+        b["cards"][1]["column"] = "Doing"
+        page = self.start(b)
+        self.settings(page)
+        page.check("input[name='limit-policy'][value='refuse']")
+        self.save_settings(page)
+        self.assertEqual(self.app.board()["settings"]["limitPolicy"], "refuse")
+        page.drag_and_drop('.card[data-key="T-1"]', '[data-col="doing"]')
+        page.wait_for_selector('[data-col="doing"] .col-note:has-text("Doing is full")')
+        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-3"], "the card goes back")
+        self.assertEqual(self.app.card("T-1")["column"], "backlog")
+        self.open_card(page, "T-1")
+        page.select_option("#card-column", "doing")
+        page.wait_for_selector("#sheet .form-error:has-text('Doing is full')")
+        self.until(page, "document.querySelector('#card-column').value === 'backlog'")
+        self.close_sheet(page)
+        page.click('[data-col="doing"] button[aria-label="Add a card to Doing"]')
+        page.fill("dialog[open] input", "Keep this title")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector(".form-error:has-text('Doing is full')")
+        self.assertEqual(page.input_value("dialog[open] input"), "Keep this title")
+
+
+class PartsHostile(PartsCase):
+    def test_names_and_values_stay_text(self):
+        b = parts_board()
+        b["labels"] = [{"name": SHORT, "color": "rose"}, "Plain"]
+        b["properties"] = [
+            {"name": SHORT, "type": "choice", "choices": [SHORT, "Other"]},
+            {"name": "Note", "type": "text"},
+            {"name": "Link", "type": "url"},
+            {"name": "Count", "type": "number", "unit": SHORT[:10]},
+        ]
+        b["settings"] = {"cardFace": ["labels", SHORT, "Note", "Link", "Count"]}
+        b["cards"][0].update(labels=[SHORT], tasks=[HOSTILE], properties={
+            SHORT: SHORT, "Note": HOSTILE, "Link": 'https://x.test/"><script>window.pwned=1</script>', "Count": 2})
+        page = self.start(b, sample_board("Second"))
+        self.assertIn(SHORT, page.locator('.card[data-key="T-1"] .meta').inner_text())
+        page.click("#filters .label-filter >> nth=0")
+        self.open_card(page, "T-1")
+        page.click("#card-labels")
+        page.click("#sheet >> text=Move to board")
+        self.assertEqual(page.input_value("#prop-note"), HOSTILE)
+        page.click("#sheet >> text=Edit")
+        page.wait_for_selector("dialog[open] form")
+        page.click("text=Cancel")
+        self.close_sheet(page)
+        self.settings(page)
+        for tab in ("labels", "properties", "face"):
+            page.click(f"#tab-{tab}")
+        page.wait_for_timeout(300)
+        self.assertIsNone(page.evaluate("window.pwned || null"))
+        self.assertEqual(page.locator("#board img, #sheet img, #board script, #sheet script, #filters img").count(), 0)
+        self.assertEqual(page.locator('a[href^="javascript"]').count(), 0)
+
+
+class PartsSizes(PartsCase):
+    def sheet_overflow(self, page):
+        return page.evaluate("document.querySelector('#sheet').scrollWidth - document.querySelector('#sheet').clientWidth")
+
+    def test_narrow_screens(self):
+        long = "Unbroken" * 30
+        b = parts_board()
+        b["labels"].append({"name": long[:40], "color": "teal"})
+        b["properties"].append({"name": long[:40], "type": "multi", "choices": [long[:40], "Short"]})
+        b["cards"][0].update(labels=["Bug", long[:40]], tasks=[long[:300], "Short"],
+                             properties={"Owner": long[:500], "Link": "https://example.test/" + long[:400], "Points": 12.5, long[:40]: long[:40]})
+        b["settings"] = {"cardFace": ["labels", "Owner", "Link", "Points", long[:40], "progress"]}
+        page = self.start(b, sample_board("Other"))
+        for width, height in [(390, 844), (320, 568)]:
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(50)
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0, f"board at {width} px")
+            self.open_card(page, "T-1")
+            page.click("#card-labels")
+            page.click("#sheet >> text=Move to board")
+            self.until(page, "!document.querySelector('#move-column').disabled")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"card at {width} px")
+            page.click("#sheet >> text=Edit")
+            page.click("#form-labels")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"form at {width} px")
+            page.click("text=Cancel")
+            self.close_sheet(page)
+            self.settings(page)
+            for tab in ("general", "labels", "properties", "face"):
+                page.click(f"#tab-{tab}")
+                self.assertLessEqual(self.sheet_overflow(page), 0, f"settings {tab} at {width} px")
+            self.close_sheet(page)
+
+
 if __name__ == "__main__":
     unittest.main()

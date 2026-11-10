@@ -95,6 +95,24 @@ time to see the keyboard shortcuts and where your data is.
   are lists every card ticks through on its own: one line per item, and a line starting with `#` is
   a heading. Lines you don't change keep their ticks when you edit a checklist.
 - Removing a column that holds cards asks which column they should move to.
+- **Labels** are colored tags a card can have several of, like Bug or Waiting. In an open card,
+  **Add labels** opens a picker: type to find a label, or type a new name and press Enter to make
+  it. The label buttons above the board show only the cards with any of the labels you pick.
+- **Properties** are values every card can hold: text, a number with a unit, one choice or several,
+  a checkbox, a link, or a star rating. Set them up under **Properties** in Board settings, then
+  fill them in on the open card, where each one saves as soon as you enter it. If someone changed
+  the same value in another tab, the card shows both and you pick which to keep.
+- **Tasks** are a card's own to-do list, separate from the board's checklists. Add, tick, reword,
+  reorder and remove them in the open card. The count on the card face adds tasks to checklist
+  ticks.
+- **Card face** in Board settings picks what each card shows under its title on the board, and in
+  what order: its group, labels, first field, progress, blocked note, and any property.
+- A column's **limit** flags the column when it holds more cards than that. Under **When a column
+  is at its limit** in Board settings you can make a full column refuse cards instead; the board
+  then says so where you tried to add or move one, and keeps what you typed.
+- **Move to board** in an open card moves it to another board and column. Its group, labels,
+  property values and ticks come along where the other board has ones with the same names, and a
+  message lists anything that didn't, with a button to go to the card.
 - Collapsing a column is remembered in that browser. It isn't saved in your boards file.
 
 Columns show the first 300 cards with a button for more, so a very long column stays quick.
@@ -111,6 +129,16 @@ Columns show the first 300 cards with a button for more, so a very long column s
 | Shift + Up or Down | Move the card within its column |
 | Shift + Left or Right | Move the card to the next column |
 | Esc | Close what's open, or clear the search |
+
+In an open card:
+
+| Key | Does |
+|---|---|
+| Enter | In a task or a value: save it. In **Add a task**: add it |
+| Alt + Up or Down | Move the task you're on |
+| Esc | In a changed task or value: put back what was saved |
+| Up and Down | In the label picker: go through the labels and back to the search box |
+| Enter | In the label picker's search box: tick or untick the first match, or make a new label |
 
 Dragging doesn't work on touch screens. Open the card and use its column list and arrow buttons.
 

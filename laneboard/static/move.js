@@ -3,8 +3,23 @@
 import { cardBy, cardsIn, state } from "./state.js";
 import { $, announce, h, toast } from "./dom.js";
 import { send } from "./api.js";
-import { render } from "./board.js";
+import { render, renderColumns } from "./board.js";
 import { matches, queryWords } from "./search.js";
+
+const NOTE_FOR = 8000;  // how long a column says why it didn't take a card
+let noteTimer = null;
+
+// A column that refused a card (it's full, on a board that refuses cards over the limit) says so at its top,
+// where the card was going, and the screen reader hears it.
+export function noteColumn(column, message) {
+  state.columnNote = { column, message };
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => {
+    state.columnNote = null;
+    if (state.board) renderColumns();
+  }, NOTE_FOR);
+  if (state.board) renderColumns();
+}
 
 export function bindDrag() {
   const main = $("#board");
@@ -70,7 +85,8 @@ export function bindDrag() {
 
 // Put a card in `column` right after prevKey, or right before nextKey, or at the bottom. Those are
 // the neighbours on screen; cards hidden by a filter or a "show more" button may sit between them.
-function moveCard(key, column, prevKey, nextKey) {
+// `refused(message)`, if given, also hears when the column won't take the card.
+function moveCard(key, column, prevKey, nextKey, refused) {
   const card = cardBy(key);
   if (!card) return;
   const current = cardsIn(column);
@@ -82,13 +98,13 @@ function moveCard(key, column, prevKey, nextKey) {
   const p = others[at - 1]?.rank;
   const n = others[at]?.rank;
   const rank = p !== undefined && n !== undefined ? (p + n) / 2 : p !== undefined ? p + 1 : n !== undefined ? n - 1 : card.rank;
-  saveMove(card, column, rank);
+  saveMove(card, column, rank, refused);
 }
 
-export function setColumn(key, column) {
+export function setColumn(key, column, refused) {
   const card = cardBy(key);
   if (!card || card.column === column) return;
-  moveCard(key, column);
+  moveCard(key, column, null, null, refused);
 }
 
 // Move up or down among the cards showing, as the buttons on a card and Shift+arrow keys do.
@@ -116,7 +132,7 @@ export function shiftColumn(key, delta) {
   return true;
 }
 
-function saveMove(card, column, rank) {
+function saveMove(card, column, rank, refused) {
   const before = { column: card.column, rank: card.rank };
   Object.assign(card, { column, rank });
   render();
@@ -129,6 +145,9 @@ function saveMove(card, column, rank) {
     .catch((e) => {
       Object.assign(card, before);
       if (state.board) render();
-      toast(e.message, { error: true });
+      if (e.status === 409 && column !== before.column) {
+        noteColumn(column, e.message);
+        refused?.(e.message);
+      } else toast(e.message, { error: true });
     });
 }

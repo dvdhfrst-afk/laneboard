@@ -5,25 +5,32 @@ import { pairsText, parsePairs } from "./util.js";
 import { $, askDiscard, closeSheet, confirmBox, field, h, sheetHead, showSheet, toast } from "./dom.js";
 import { send } from "./api.js";
 import { openCard } from "./card.js";
+import { labelsField } from "./labels.js";
+import { editor, propField, sameValue } from "./properties.js";
 
 function onlyFilteredGroup() {
   return state.groups.size === 1 ? [...state.groups][0] || null : null;
 }
 
 // The part of a card the edit form shows, for telling whether someone else has changed it.
-const formPart = (card) => (card ? JSON.stringify([card.title, card.group, card.column, card.summary, card.blocked, card.fields, card.sections]) : "");
+const formPart = (card) => (card ? JSON.stringify([card.title, card.group, card.column, card.summary, card.blocked, card.fields, card.sections,
+  card.labels, card.properties]) : "");
 
 export function openCardForm(key, defaults = {}) {
   const b = state.board;
   const card = key ? cardBy(key) : null;
   let startedFrom = formPart(card);
   const v = card || { title: "", group: onlyFilteredGroup(), column: defaults.column || b.columns[0].id,
-    summary: "", blocked: "", fields: [], sections: b.template.map((label) => ({ label, body: "" })) };
+    summary: "", blocked: "", fields: [], sections: b.template.map((label) => ({ label, body: "" })),
+    labels: state.labels.size === 1 ? [...state.labels] : [], properties: {} };
   const title = h("input", { maxLength: 200, value: v.title, autofocus: true });
   const group = h("select", {}, h("option", { value: "", text: "None" }), b.groups.map((g) => h("option", { value: g.id, text: g.name })));
   group.value = v.group || "";
   const column = h("select", {}, b.columns.map((c) => h("option", { value: c.id, text: c.name })));
   column.value = v.column;
+  const labels = labelsField(v.labels, () => { sheet.dirty = true; });
+  const props = b.properties.map((prop) => ({ prop, start: v.properties[prop.id] ?? null,
+    ed: editor(prop, v.properties[prop.id], { id: `form-prop-${prop.id}` }) }));
   const summary = h("textarea", { rows: 3, maxLength: 1000, value: v.summary });
   const blocked = h("input", { maxLength: 500, value: v.blocked });
   const fields = h("textarea", { rows: Math.max(3, v.fields.length + 1), value: pairsText(v.fields), placeholder: "Size: 3 to 4 hours" });
@@ -89,6 +96,12 @@ export function openCardForm(key, defaults = {}) {
       const ranks = cardsIn(values.column).map((c) => c.rank);
       if (ranks.length) values.rank = ranks[ranks.length - 1] + 1;
     }
+    // On a card being edited, only what was changed here, so labels and values changed in the card view
+    // meanwhile aren't put back.
+    const picked = labels.value();
+    if (!card || !sameValue(picked, v.labels)) values.labels = picked;
+    const changed = props.filter((p) => !sameValue(p.ed.read(), p.start));
+    if (changed.length) values.properties = Object.fromEntries(changed.map((p) => [p.prop.id, p.ed.read()]));
     submit.disabled = true;
     try {
       if (card) {
@@ -119,6 +132,8 @@ export function openCardForm(key, defaults = {}) {
   const form = h("form", { class: "form", novalidate: true, oninput: () => { sheet.dirty = true; }, onsubmit },
     field("Title", title),
     h("div", { class: "row2" }, field(b.groupLabel, group), field("Column", column)),
+    labels.node,
+    props.length && h("div", { class: "prop-grid" }, props.map((p) => propField(p.prop, p.ed))),
     field("Summary", summary, "A sentence or two about what this card is for."),
     field("Blocked by", blocked, "Leave empty when nothing blocks it."),
     field("Fields", fields, "One per line, as Label: value. The first one shows on the card."),

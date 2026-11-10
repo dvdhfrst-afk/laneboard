@@ -11,7 +11,9 @@ export const state = {
   board: null,         // the open board, as the server last sent it
   query: "",
   groups: new Set(),   // group filter; empty shows every card, "" stands for cards with no group
+  labels: new Set(),   // label filter; empty shows every card, otherwise cards with any of these labels
   blockedOnly: false,
+  columnNote: null,    // {column, message}: why a card couldn't go into that column, shown at the top of it
   drag: null,          // key of the card being dragged
   shown: new Map(),    // column id -> how many cards to draw
   focusKey: null,      // the card that keyboard focus belongs on
@@ -22,7 +24,9 @@ export const state = {
 };
 
 // Lookup tables for the open board, rebuilt whenever it changes. Search text is filled in as needed.
-export let index = { byKey: new Map(), byColumn: new Map(), groups: new Map(), checkIds: new Set(), archived: [], text: new Map() };
+const emptyIndex = () => ({ byKey: new Map(), byColumn: new Map(), groups: new Map(), labels: new Map(), props: new Map(),
+  checkIds: new Set(), archived: [], text: new Map() });
+export let index = emptyIndex();
 
 // The last revision seen per board. A queued change must carry its own board's revision even if
 // the person has moved on to another board by the time it runs.
@@ -47,6 +51,7 @@ export const cardBy = (key) => index.byKey.get(key);
 export const cardsIn = (column) => index.byColumn.get(column) || [];
 export const activeCards = () => state.board.cards.filter((c) => !c.archived);
 export const groupOf = (card) => index.groups.get(card.group) || null;
+export const labelsOf = (ids) => ids.map((id) => index.labels.get(id)).filter(Boolean);
 
 export function setBoard(board) {
   state.board = board;
@@ -57,10 +62,12 @@ export function setBoard(board) {
 
 export function reindex() {
   const b = state.board;
-  index = { byKey: new Map(), byColumn: new Map(), groups: new Map(), checkIds: new Set(), archived: [], text: new Map() };
+  index = emptyIndex();
   if (!b) return;
   for (const col of b.columns) index.byColumn.set(col.id, []);
   for (const g of b.groups) index.groups.set(g.id, g);
+  for (const label of b.labels) index.labels.set(label.id, label);
+  for (const prop of b.properties) index.props.set(prop.id, prop);
   for (const cl of b.checklists) for (const item of cl.items) if (!item.heading) index.checkIds.add(item.id);
   for (const card of b.cards) {
     index.byKey.set(card.key, card);
@@ -79,7 +86,9 @@ export function syncListEntry() {
 // How the last board was being looked at, forgotten when another board opens.
 export function resetView() {
   state.groups.clear();
+  state.labels.clear();
   state.blockedOnly = false;
+  state.columnNote = null;
   state.shown.clear();
   state.focusKey = null;
 }
