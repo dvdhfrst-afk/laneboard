@@ -204,13 +204,13 @@ class PropertyTest(Case):
 
 class ViewAndSettingsTest(Case):
     def test_views_are_stored_as_given(self):
-        board = self.change(views=[{"name": "Open bugs", "query": "label:bug is:open", "sort": "-points,title"},
-                                   {"name": "All"}])
-        self.assertEqual(board["views"], [{"id": "open-bugs", "name": "Open bugs", "query": "label:bug is:open", "sort": "-points,title"},
+        board = self.change(labels=["Bug"], properties=[{"name": "Points", "type": "number"}],
+                            views=[{"name": "Open bugs", "query": "label:BUG  -is:done", "sort": "-points,title"}, {"name": "All"}])
+        self.assertEqual(board["views"], [{"id": "open-bugs", "name": "Open bugs", "query": "label:BUG  -is:done", "sort": "-points,title"},
                                           {"id": "all", "name": "All", "query": "", "sort": ""}])
         board = self.change(views=[dict(board["views"][1], name="Everything"), {"id": "open-bugs", "name": "Bugs"}])
         self.assertEqual([(v["id"], v["name"], v["query"]) for v in board["views"]],
-                         [("all", "Everything", ""), ("open-bugs", "Bugs", "label:bug is:open")])
+                         [("all", "Everything", ""), ("open-bugs", "Bugs", "label:BUG  -is:done")])
 
     def test_removing_the_default_view_clears_the_default(self):
         board = self.change(views=[{"name": "Mine", "query": "x"}, {"name": "Yours", "query": "y"}], settings={"defaultView": "mine"})

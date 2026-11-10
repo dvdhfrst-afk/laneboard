@@ -162,13 +162,13 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard labels BOARD` | List labels. `--add NAME` (with `--color`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard properties BOARD` | List properties. `--add NAME --type TYPE` (with `--choices`, `--min`, `--max`, `--decimals`, `--unit`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard views BOARD` | List saved views. `--add NAME --query Q` (with `--sort`), `--remove NAME`, `--default NAME` or `none` |
-| `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C` |
+| `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C`, `--default VIEW` or `none` |
 | `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing |
 | `laneboard export BOARD` | Write a board as JSON. `-o FILE`, `--force`, or `--all` for every board |
 | `laneboard sample [NAME]` | List the example boards, or add one |
 | `laneboard backups` | List the copies you can go back to |
 | `laneboard restore NAME` | Go back to one |
-| `laneboard check` | Check that the file can be read, without changing it |
+| `laneboard check` | Check that the file can be read, without changing it. Saved views that no longer work are listed as warnings |
 
 `--label`, `--unlabel`, `--set`, `--clear` and the `task` options can be given more than once. A value
 that starts with `-`, like a sort, goes after an `=`: `--sort=-points`.

@@ -268,13 +268,15 @@ class ViewsTest(Case):
 
     def test_views_are_stored_as_given(self):
         self.assertEqual(self.lines("views", "Work"), ["Work has no saved views yet. Add one with --add NAME --query Q."])
-        self.assertEqual(self.lines("views", "Work", "--add", "Open bugs", "--query", "label:bug is:open", "--sort=-points,title"),
+        self.run_cli("labels", "Work", "--add", "Bug")
+        self.run_cli("properties", "Work", "--add", "Points", "--type", "number")
+        self.assertEqual(self.lines("views", "Work", "--add", "Open bugs", "--query", "label:bug -is:done", "--sort=-points,title"),
                          ["Added Open bugs."])
         self.run_cli("views", "Work", "--add", "Everything", "--query", "")
-        self.assertEqual(self.board()["views"][0], {"id": "open-bugs", "name": "Open bugs", "query": "label:bug is:open",
+        self.assertEqual(self.board()["views"][0], {"id": "open-bugs", "name": "Open bugs", "query": "label:bug -is:done",
                                                      "sort": "-points,title"})
         self.assertEqual(self.lines("views", "Work", "--default", "open BUGS"), ["The board opens with Open bugs."])
-        self.assertEqual(self.lines("views", "Work"), [f"{'Open bugs':<24} label:bug is:open  sorted by -points,title  (opens by default)",
+        self.assertEqual(self.lines("views", "Work"), [f"{'Open bugs':<24} label:bug -is:done  sorted by -points,title  (opens by default)",
                                                        f"{'Everything':<24} (every card)"])
         self.assertEqual(self.lines("views", "Work", "--remove", "Open bugs"), ["Removed Open bugs."])
         self.assertIsNone(self.board()["settings"]["defaultView"], "removing the default view clears it")

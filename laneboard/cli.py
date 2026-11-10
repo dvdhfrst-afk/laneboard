@@ -15,6 +15,7 @@ from datetime import datetime
 
 from . import __version__, samples, storage
 from .properties import TYPE_NAMES, TYPES, find_property, property_text
+from .query import QueryError, broken_views, describe_error
 from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
 from .server import BoardServer, encode_json
 from .store import Store, default_data_path, restore_backup, resolve_path
@@ -525,6 +526,25 @@ def cmd_properties(args):
         print(f"{board['name']} has no properties yet. Add one with --add NAME --type TYPE.")
 
 
+def pointed(error, query, sort=""):
+    """A search error as a plain StoreError, with the text it is about shown under it and a ^ at the spot."""
+    return StoreError(describe_error(sort if error.part == "sort" else query, error))
+
+
+def view_trouble(view, error):
+    return f"the saved view \"{view['name']}\" doesn't work any more: {error}"
+
+
+def default_view(given):
+    """--default NAME: a saved view by name or id, or none for no default view."""
+    return None if given.strip().lower() == "none" else given
+
+
+def opens_with(board):
+    default = next((v["name"] for v in board["views"] if v["id"] == board["settings"]["defaultView"]), None)
+    return f"The board opens with {default}." if default else "The board opens with no view."
+
+
 def cmd_views(args):
     if (args.query is not None or args.sort is not None) and not args.add:
         args.parser.error("--query and --sort go with --add")
@@ -548,15 +568,17 @@ def cmd_views(args):
         if args.remove or args.add:
             changes["views"] = views
         if args.default is not None:
-            changes["settings"] = {"defaultView": None if args.default.strip().lower() == "none" else args.default}
+            changes["settings"] = {"defaultView": default_view(args.default)}
         updated = store.update_board(board["id"], changes, rev=board["rev"])
         if args.default is not None:
-            default = next((v["name"] for v in updated["views"] if v["id"] == updated["settings"]["defaultView"]), None)
-            said.append(f"The board opens with {default}." if default else "The board opens with no view.")
+            said.append(opens_with(updated))
         return updated
 
     if args.remove or args.add or args.default is not None:
-        changing(store, board_id, build)
+        try:
+            changing(store, board_id, build)
+        except QueryError as e:  # the new view's search or sort can't be read
+            raise pointed(e, args.query, args.sort) from None
         print("\n".join(said))
         return
     board = store.get_board(board_id)
@@ -582,6 +604,8 @@ def cmd_settings(args):
         settings["limitPolicy"] = args.limit_policy
     if args.card_face is not None:
         settings["cardFace"] = [part.strip() for part in args.card_face.split(",") if part.strip()]
+    if args.default is not None:
+        settings["defaultView"] = default_view(args.default)
     if settings:
         changes["settings"] = settings
     board = store.update_board(board_id, changes) if changes else store.get_board(board_id)
@@ -658,10 +682,16 @@ def cmd_check(args):
     if not os.path.exists(path):
         print("It doesn't exist yet. Laneboard creates it the first time it needs it.")
         return
-    status = Store(path, create=False).status()
+    store = Store(path, create=False)
+    status = store.status()
     print(f"Format: {status['schema']}" + (f" (the file is at {status['upgradedFrom']} and upgrades on the next save)" if status["upgradedFrom"] else ""))
     print(f"Boards: {status['boards']}, cards: {status['cards']}")
     print(f"Backups: {len(storage.list_backups(path))}")
+    broken = [(board, view, error) for board in store.all_data()["boards"] for view, error in broken_views(board)]
+    for board, view, error in broken:
+        print(f"Warning: on {board['name']}, {view_trouble(view, error)}")
+    if broken:
+        print("Those views are kept as they are. Change or remove them with laneboard views.")
     print("OK")
 
 
@@ -781,6 +811,7 @@ def build_parser():
                    help="warn: flag a column over its limit; refuse: a full column takes no more cards")
     p.add_argument("--card-face", metavar="A,B,C",
                    help="what cards show, in order: " + ", ".join(CARD_FACE_PARTS) + " and property names (\"\" for only the title)")
+    p.add_argument("--default", metavar="NAME", help="the saved view the board opens with (by name or id), or none")
     p = command("import", cmd_import, "add boards from a JSON file (one exported board, or a whole boards file)")
     p.add_argument("file", help="the file, or - for standard input")
     p = command("export", cmd_export, "write a board as JSON")

@@ -17,6 +17,7 @@ from contextlib import contextmanager
 
 from . import schema, storage
 from .properties import TYPES, _assign_ids, _shown, clean_definitions, find_property, prune_values
+from .query import QueryError, prepare
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
                      CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
                      MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
@@ -396,7 +397,10 @@ class Store:
                 seen.add(card["key"])
         draft["cards"] = built
         try:
+            self._check_views(draft)  # with the cards in: a label a card brought can be in a view
             self._check_limits(draft, {c["id"] for c in draft["columns"]})
+        except QueryError as e:  # a plain error: an import has no search box to point into
+            raise StoreError(f"{where}: {e}") from e
         except StoreError as e:
             raise type(e)(f"{where}: {e}") from e
         return draft
@@ -428,7 +432,7 @@ class Store:
         if board.get("properties") is not None:
             self._apply_properties(draft, board["properties"], keep_ids=True)
         if board.get("views") is not None:
-            self._apply_views(draft, board["views"], keep_ids=True)
+            self._apply_views(draft, board["views"], keep_ids=True, check=False)
         if board.get("settings") is not None:
             self._apply_settings(draft, board["settings"])
         cards = board.get("cards") or []
@@ -1066,7 +1070,7 @@ class Store:
     def _views(board, views, keep_ids=False):
         """A whole new list of saved views. Ids are kept as labels' are; a query or sort left out keeps the old one.
 
-        The query and sort are stored as they are given; this module doesn't read them.
+        The query and sort are stored as they are given; `_check_views` makes sure they can be read.
         """
         if not isinstance(views, list):
             raise StoreError("Saved views must be a list.")
@@ -1090,11 +1094,31 @@ class Store:
                         "sort": text(raw.get("sort", before.get("sort", "")), f"The sort for {name}", MAX_SORT)})
         return out
 
-    def _apply_views(self, board, views, keep_ids=False):
+    def _apply_views(self, board, views, keep_ids=False, check=True):
+        before = {v["id"]: v for v in board["views"]}
         board["views"] = self._views(board, views, keep_ids)
+        if check:
+            self._check_views(board, before)
         default = board["settings"]["defaultView"]
         if default is not None and default not in {v["id"] for v in board["views"]}:
             board["settings"] = {**board["settings"], "defaultView": None}
+
+    @staticmethod
+    def _check_views(board, before=None):
+        """Every saved view that is new, or whose search or sort changed, must work on the board as it now is.
+
+        A view left as it was isn't read again: one that stopped working when a property it names was
+        removed stays on the board, so no change elsewhere loses it, and using it says what's wrong.
+        Raises QueryError, with the position in the view's search or sort.
+        """
+        for view in board["views"]:
+            old = (before or {}).get(view["id"])
+            if old is not None and old["query"] == view["query"] and old["sort"] == view["sort"]:
+                continue
+            try:
+                prepare(board, view["query"], view["sort"])
+            except QueryError as e:
+                raise QueryError(f"The saved view \"{_shown(view['name'])}\" can't be saved: {e}", e.position, e.part) from None
 
     def _apply_settings(self, board, raw):
         """Change some of the board's settings; those left out stay as they are."""

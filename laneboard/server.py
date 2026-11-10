@@ -17,6 +17,7 @@ from typing import Optional
 from urllib.parse import quote, urlsplit
 
 from . import __version__, samples, storage
+from .query import QueryError
 from .schema import SCHEMA_VERSION, slug
 from .store import Store, StoreError
 
@@ -129,6 +130,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(405, "Only GET works outside /api/.")
         except HttpError as e:
             self._json(e.status, {"error": str(e)})
+        except QueryError as e:  # a search, or a saved view's: say where, so the page can point at it
+            self._json(e.status, {"error": str(e), "position": e.position, "part": e.part})
         except StoreError as e:
             self._json(e.status, {"error": str(e)})
         except (ConnectionError, socket.timeout):
