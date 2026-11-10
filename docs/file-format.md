@@ -138,7 +138,8 @@ per board, 20 columns, 50 groups, 30 fields or sections on a card, 10 checklists
 50 labels per board (names 40 characters) and 20 on a card. 30 properties per board (names 40
 characters), 50 choices on a property, 20 picked at once, text and link values 500 characters, units
 10. 30 saved views per board (names 60 characters, searches 500, sorts 200). 100 tasks on a card, 300
-characters each. 100 saved templates.
+characters each. 100 saved templates. Lists and objects nest at most 64 deep, which a board never comes
+close to.
 
 ## Editing by hand
 

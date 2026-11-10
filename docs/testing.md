@@ -1,6 +1,6 @@
 # What has and hasn't been tested
 
-Everything here comes from runs of this code. Nobody outside the project has used it yet.
+Everything here comes from runs of this code unless it says 1.0.0. Nobody outside the project has used it yet.
 
 ## The test suite
 
@@ -11,13 +11,14 @@ Everything here comes from runs of this code. Nobody outside the project has use
 | Windows 11 | 3.9.25, 3.11.9, 3.12.10, 3.14.4 |
 | Ubuntu under WSL (Windows Subsystem for Linux), as an ordinary user | 3.14.4 |
 
-On Python 3.9 on Windows it is 243 tests, of which 48 skip: 45 browser tests when Playwright isn't installed, and 3
-that can't run there (file permissions, closing a pipe early, and symlinks, which that account can't make).
+On Python 3.9 on Windows it is 755 tests, of which 99 skip: 96 browser tests when Playwright isn't installed, and 3
+that can't run there (file permissions, closing a pipe early, and symlinks, which that account can't make). One more
+skips outside a git checkout. On Linux the browser tests skip the same way.
 
 ## Real browser
 
 `tests/test_browser.py` drives the real page in headless Chrome, with the server running on Python 3.9 on
-Windows. All 45 tests pass. They include:
+Windows. All 96 tests pass. They include:
 
 - First run, example boards, and a file with no boards at all
 - Drag and drop, the keyboard, and the move buttons on a card
@@ -30,13 +31,24 @@ Windows. All 45 tests pass. They include:
   content security policy
 - Long unbroken text at widths of 320, 390, 800, 1440 and 2560 pixels, with no sideways scrolling
 - Malformed addresses, bad imports, and UTF-16 files
+- Labels, properties of every kind, tasks and the card face set up in Board settings and shown on cards
+- The search language and its messages, sorting, saved views and the default view, and searching every board
+- Templates: starting a board from one and saving your own
+- The Import sheet's preview for Markdown and Trello files, a wrong format refused, and export in every format
+- The summary panel, checked against the server's own numbers
+- Moving a card to another board, the boards overview, archived boards, the Backups sheet and the command palette
 
 **A long session.** The test `LongSession` makes random real actions through the page (add, rename, duplicate,
 delete, archive, restore, notes, ticks, three ways of moving, search, filter, collapse), keeps a separate record
 of what should have happened, then compares that with the file and a reloaded page. One run of 800 actions on a
-1,000 card board ended with a matching file and page: `LANEBOARD_SESSION_STEPS=800 python -m unittest tests.test_browser.LongSession`.
+1,000 card board ended with a matching file and page on 1.0.0: `LANEBOARD_SESSION_STEPS=800 python -m unittest tests.test_browser.LongSession`.
+On 1.1.0 it runs at its usual 120 actions as part of the suite.
 
-Separately, by hand with scripts:
+**Next to an older program.** The 1.1.0 page was opened against a running 1.0.0 program, as happens when the files
+are updated before the program is restarted. It shows the board and a bar asking for a restart. Changes that need
+1.1.0 are refused by the older program with a message, and the file is left as it was.
+
+Separately, by hand with scripts, on 1.0.0 and not repeated for 1.1.0:
 
 - The server on Linux, the page in Chrome on Windows through WSL's port forwarding: add, notes, drag, reload.
 - A phone-sized window with touch emulation: adding, moving with the card's own controls, and wrong input in
@@ -55,10 +67,10 @@ Separately, by hand with scripts:
 - Two programs saving to one file at once
 - A broken file, an empty file, binary junk, very deep nesting, `NaN` and `Infinity`, wrong shapes, and files from a
   newer version: all refused with a message and left unchanged
-- Files in the old format: every card, note, section, tick and revision kept through the upgrade, with a byte-for-byte
-  copy of the original
+- Files in each older format: every card, note, section, tick and revision kept through the upgrade, with a
+  byte-for-byte copy of the original
 
-The format upgrade also ran on a copy of a real file from daily use: everything came through.
+The upgrade from format 2 to 3 also ran on a copy of a real file from daily use: every card came through unchanged.
 
 ## How big it goes
 
@@ -67,12 +79,12 @@ of memory and an NVMe SSD, Python 3.12, in headless Chrome. Times are in millise
 
 | Cards | File | Open file | Save one change | Open the page | Search | Open a card | Move a card |
 |---|---|---|---|---|---|---|---|
-| 100 | 0.1 MB | 1 | 29 | 95 | 8 | 101 | 33 |
-| 1,000 | 1.0 MB | 6 | 73 | 166 | 164 | 127 | 96 |
-| 5,000 | 4.9 MB | 57 | 159 | 178 | 165 | 134 | 102 |
-| 20,000 | 19.7 MB | 248 | 813 | 312 | 174 | 231 | 200 |
+| 100 | 0.1 MB | 2 | 45 | 103 | 6 | 103 | 34 |
+| 1,000 | 1.0 MB | 9 | 76 | 157 | 136 | 131 | 100 |
+| 5,000 | 5.2 MB | 92 | 175 | 193 | 142 | 138 | 106 |
+| 20,000 | 20.9 MB | 419 | 931 | 350 | 164 | 139 | 141 |
 
-- **Save one change** writes the whole file, so it grows with the file. At 20,000 cards a save takes most of a second, and
+- **Save one change** writes the whole file, so it grows with the file. At 20,000 cards a save takes about a second, and
   while one is running the next change waits its turn. The screen updates at once regardless.
 - **Open the page** counts until cards show. Only 300 cards per column are drawn at first, so the five columns here stop at 1,500.
 - **Search** includes the short wait for typing to settle on boards over 500 cards.
@@ -81,7 +93,7 @@ of memory and an NVMe SSD, Python 3.12, in headless Chrome. Times are in millise
 
 ## Install
 
-From a clean copy on Python 3.9 on Windows, in a new virtual environment: `pip install .`, then `laneboard --version`,
+For 1.1.0, from a clean copy on Python 3.9 on Windows, in a new virtual environment: `pip install .`, then `laneboard --version`,
 `sample` and `boards` from another folder. The built wheel holds the page and the example boards. The source package
 also holds the docs and tests.
 
