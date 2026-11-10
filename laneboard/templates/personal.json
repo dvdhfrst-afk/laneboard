@@ -1,0 +1,98 @@
+{
+ "id": "personal",
+ "name": "Personal",
+ "description": "A light board for home, errands and health: To do, Doing, Done.",
+ "board": {
+  "prefix": "ME",
+  "groupLabel": "Area",
+  "columns": [
+   {
+    "name": "To do",
+    "limit": null
+   },
+   {
+    "name": "Doing",
+    "limit": 3
+   },
+   {
+    "name": "Done",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Home",
+    "color": "green"
+   },
+   {
+    "name": "Errands",
+    "color": "amber"
+   },
+   {
+    "name": "Health",
+    "color": "rose"
+   }
+  ],
+  "views": [
+   {
+    "name": "Errands",
+    "query": "label:errands -column:done",
+    "sort": ""
+   },
+   {
+    "name": "Around the house",
+    "query": "label:home -column:done",
+    "sort": ""
+   }
+  ],
+  "template": [
+   "Notes"
+  ]
+ },
+ "cards": [
+  {
+   "title": "Book a dentist appointment",
+   "column": "To do",
+   "labels": [
+    "Health"
+   ],
+   "summary": "Ask for a morning slot."
+  },
+  {
+   "title": "Buy groceries",
+   "column": "Doing",
+   "labels": [
+    "Errands"
+   ],
+   "tasks": [
+    {
+     "text": "Bread",
+     "done": true
+    },
+    {
+     "text": "Eggs",
+     "done": false
+    },
+    {
+     "text": "Coffee",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Fix the dripping tap",
+   "column": "To do",
+   "labels": [
+    "Home"
+   ],
+   "blocked": "Waiting for a new washer."
+  },
+  {
+   "title": "Go for a 30 minute walk",
+   "column": "Done",
+   "labels": [
+    "Health"
+   ]
+  }
+ ]
+}
