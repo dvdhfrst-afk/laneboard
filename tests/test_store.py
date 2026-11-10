@@ -5,6 +5,7 @@ import time
 import unittest
 
 from laneboard import samples
+from laneboard import store as store_module
 from laneboard.schema import COLORS
 from laneboard.store import (Conflict, NotFound, StaleRevision, Store, StoreError, default_data_path)
 
@@ -210,6 +211,28 @@ class FileTest(StoreTestCase):
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(data, f)
         self.assertEqual(self.store.get_board(self.board)["name"], "Edited by hand")
+
+    def test_a_save_made_while_the_file_is_being_read_is_not_lost(self):
+        """Another program (the command line, say) saves just after this one read the file. The next change
+        here must be made on top of that save, not on the copy read a moment before it."""
+        other = Store(self.path)
+        other.update_board(self.board, {"name": "Renamed elsewhere"})
+        real = store_module._read_bytes
+
+        def read_then_other_saves(path):
+            raw = real(path)
+            store_module._read_bytes = real
+            other.create_card(self.board, {"title": "Saved meanwhile"})
+            return raw
+
+        store_module._read_bytes = read_then_other_saves
+        try:
+            self.store.get_board(self.board)
+        finally:
+            store_module._read_bytes = real
+        self.store.create_card(self.board, {"title": "Mine"})
+        titles = [c["title"] for c in Store(self.path).get_board(self.board)["cards"]]
+        self.assertEqual(titles, ["Saved meanwhile", "Mine"])
 
     def test_failed_change_leaves_the_file_alone(self):
         with open(self.path, encoding="utf-8") as f:

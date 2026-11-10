@@ -140,8 +140,10 @@ class Store:
 
     def _read(self):
         try:
-            raw = _read_bytes(self.path)
+            # The stamp first: a save landing between the two then looks like a change still to pick up. Taken
+            # after, it would mark the newer file as read while the bytes in hand are the older one.
             stamp = self._file_stamp()
+            raw = _read_bytes(self.path)
         except OSError as e:
             raise Unavailable(f"Can't read {self.path}: {storage.reason(e)}.") from e
         try:
