@@ -1,6 +1,7 @@
 include LICENSE README.md CHANGELOG.md SECURITY.md CONTRIBUTING.md
 recursive-include docs *.md
 recursive-include tests *.py
+recursive-include tests/fixtures *.json
 recursive-include laneboard/static *
 recursive-include laneboard/samples *.json
 recursive-include laneboard/templates *.json

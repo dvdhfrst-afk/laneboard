@@ -1,0 +1,78 @@
+[
+  {
+    "assignees": [{"id": "U_example01", "login": "example-user", "name": "Example User"}],
+    "body": "Steps to see it:\n\n1. Open the settings page\n2. Press Save twice\n\nThe second save shows an error.",
+    "labels": [{"id": "LA_example01", "name": "bug", "description": "Something isn't working", "color": "d73a4a"}],
+    "milestone": {"number": 1, "title": "v1.2", "description": "", "dueOn": "2026-12-15T00:00:00Z"},
+    "number": 12,
+    "state": "OPEN",
+    "title": "Saving the settings twice shows an error",
+    "url": "https://github.com/example-org/example-repo/issues/12"
+  },
+  {
+    "assignees": [],
+    "body": "",
+    "labels": [{"id": "LA_example02", "name": "enhancement", "description": "New feature or request", "color": "a2eeef"}],
+    "milestone": {"number": 2, "title": "v2.0", "description": "The next big release", "dueOn": null},
+    "number": 15,
+    "state": "OPEN",
+    "title": "Let people pick a dark theme",
+    "url": "https://github.com/example-org/example-repo/issues/15"
+  },
+  {
+    "assignees": [{"id": "U_example02", "login": "another-user", "name": ""}, {"id": "U_example01", "login": "example-user", "name": "Example User"}],
+    "body": "The install section still names the old command.",
+    "labels": [
+      {"id": "LA_example03", "name": "documentation", "description": "Improvements or additions to documentation", "color": "0075ca"},
+      {"id": "LA_example04", "name": "good first issue", "description": "Good for newcomers", "color": "7057ff"}
+    ],
+    "milestone": {"number": 1, "title": "v1.2", "description": "", "dueOn": "2026-12-15T00:00:00Z"},
+    "number": 9,
+    "state": "CLOSED",
+    "title": "Fix the install steps in the readme",
+    "url": "https://github.com/example-org/example-repo/issues/9"
+  },
+  {
+    "assignees": [],
+    "body": null,
+    "labels": [],
+    "milestone": null,
+    "number": 21,
+    "state": "OPEN",
+    "title": "Question: can the export include archived items?",
+    "url": "https://github.com/example-org/example-repo/issues/21"
+  },
+  {
+    "assignees": [{"id": "U_example03", "login": "third-example", "name": "Third Example"}],
+    "body": "Crash log:\n\n```\nError: out of range\n  at load (store.js:10)\n```",
+    "labels": [
+      {"id": "LA_example01", "name": "bug", "description": "Something isn't working", "color": "d73a4a"},
+      {"id": "LA_example05", "name": "help wanted", "description": "Extra attention is needed", "color": "008672"}
+    ],
+    "milestone": {"number": 2, "title": "v2.0", "description": "The next big release", "dueOn": null},
+    "number": 18,
+    "state": "OPEN",
+    "title": "Loading a very large file crashes",
+    "url": "https://github.com/example-org/example-repo/issues/18"
+  },
+  {
+    "assignees": [],
+    "body": "Not something we will do.",
+    "labels": [{"id": "LA_example06", "name": "wontfix", "description": "This will not be worked on", "color": "ffffff"}],
+    "milestone": null,
+    "number": 4,
+    "state": "CLOSED",
+    "title": "Support a printer driver",
+    "url": "https://github.com/example-org/example-repo/issues/4"
+  },
+  {
+    "assignees": [{"id": "U_example01", "login": "example-user", "name": "Example User"}],
+    "body": "Done in the last release.",
+    "labels": [{"id": "LA_example02", "name": "enhancement", "description": "New feature or request", "color": "a2eeef"}],
+    "milestone": {"number": 1, "title": "v1.2", "description": "", "dueOn": "2026-12-15T00:00:00Z"},
+    "number": 7,
+    "state": "CLOSED",
+    "title": "Remember the last folder used",
+    "url": "https://github.com/example-org/example-repo/issues/7"
+  }
+]
