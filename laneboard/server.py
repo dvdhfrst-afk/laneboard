@@ -16,18 +16,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, samples, storage
+from . import __version__, formats, samples, stats, storage
 from .query import QueryError, run, search_boards
-from .schema import SCHEMA_VERSION, slug
-from .store import Store, StoreError
+from .schema import MAX_IMPORT_BYTES, SCHEMA_VERSION, slug
+from .store import Store, StoreError, outline
 from .templates import describe
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY = 4_000_000
-MAX_IMPORT = 64_000_000
+MAX_IMPORT = MAX_IMPORT_BYTES
 MAX_DRAIN = 2 * MAX_IMPORT
 MAX_PARAMS = 20  # in a query string
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+# What a file to import may be sent as. Each needs a browser's preflight to be sent from another site; the
+# types a plain form can send (text/plain and the form encodings) are refused for that reason.
+IMPORT_TYPES = ("application/json", "text/markdown", "text/x-markdown", "application/octet-stream")
 CONTENT_TYPES = {  # not mimetypes: on Windows it reads the registry, which can call .js text/plain, and the page dies
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -48,6 +51,7 @@ ROUTES = [
     ("GET", re.compile(r"/api/boards"), "list_boards"),
     ("POST", re.compile(r"/api/boards"), "create_board"),
     ("GET", re.compile(r"/api/export"), "export_all"),
+    ("GET", re.compile(r"/api/formats"), "list_formats"),
     ("POST", re.compile(r"/api/import"), "import_file"),
     ("GET", re.compile(r"/api/search"), "search_all"),
     ("GET", re.compile(r"/api/templates"), "list_templates"),
@@ -61,6 +65,7 @@ ROUTES = [
     ("DELETE", re.compile(rf"/api/boards/{BOARD}"), "delete_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/export"), "export_board"),
     ("GET", re.compile(rf"/api/boards/{BOARD}/search"), "search_board"),
+    ("GET", re.compile(rf"/api/boards/{BOARD}/summary"), "board_summary"),
     ("POST", re.compile(rf"/api/boards/{BOARD}/cards"), "create_card"),
     ("PATCH", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "update_card"),
     ("DELETE", re.compile(rf"/api/boards/{BOARD}/cards/{KEY}"), "delete_card"),
@@ -167,7 +172,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin and urlsplit(origin).netloc.lower() != (self.headers.get("Host") or "").lower():
             raise HttpError(403, "Changes are only accepted from the board's own page.")
 
-    def _body(self, limit=MAX_BODY):
+    def _length(self, limit):
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
@@ -176,6 +181,21 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(400, "Content-Length must be a number.")
         if length > limit:
             raise HttpError(413, f"That request is too large (the limit is {limit // 1_000_000} MB).")
+        return length
+
+    def _file(self, limit):
+        """The bytes of a file sent to import, as they are."""
+        length = self._length(limit)
+        if not length:
+            return b""
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() not in IMPORT_TYPES:
+            raise HttpError(415, "Send the file as application/json, text/markdown or application/octet-stream.")
+        data = self.rfile.read(length)
+        self._body_read = True
+        return data
+
+    def _body(self, limit=MAX_BODY):
+        length = self._length(limit)
         if not length:
             return {}
         if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
@@ -206,12 +226,17 @@ class Handler(BaseHTTPRequestHandler):
             raise HttpError(400, f"Give {name} only once.")
         return values[0]
 
+    def _flag(self, name, problem):
+        """A yes or no parameter: 1 or true, or 0, false or nothing. Anything else is refused with `problem`."""
+        value = self._param(name, "0").strip().lower()
+        if value not in ("0", "1", "false", "true", ""):
+            raise HttpError(400, problem)
+        return value in ("1", "true")
+
     def _search_params(self):
         """q, sort and archived, as the search routes take them."""
-        archived = self._param("archived", "0").strip().lower()
-        if archived not in ("0", "1", "false", "true", ""):
-            raise HttpError(400, "archived must be 0 (leave archived cards out) or 1 (include them).")
-        return self._param("q"), self._param("sort"), archived in ("1", "true")
+        archived = self._flag("archived", "archived must be 0 (leave archived cards out) or 1 (include them).")
+        return self._param("q"), self._param("sort"), archived
 
     def _rev(self):
         value = self.headers.get("If-Match")
@@ -230,8 +255,10 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             matched = True
             if route_method == method:
-                status, payload, *extra = getattr(self, "api_" + name)(**m.groupdict())
-                self._json(status, payload, *extra)
+                answer = getattr(self, "api_" + name)(**m.groupdict())
+                if answer is not None:  # None: the route sent a file itself
+                    status, payload, *extra = answer
+                    self._json(status, payload, *extra)
                 return
         if matched:
             raise HttpError(405, f"{method} isn't allowed on {path}.")
@@ -296,21 +323,42 @@ class Handler(BaseHTTPRequestHandler):
         done = self.store.transfer_card(board, key, target, body.get("column"), rev=self._rev(), target_rev=target_rev)
         return 200, done
 
-    def _download(self, payload, name):
-        filename = (slug(name, ()) or "board") + ".json"
-        disposition = f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"
-        return 200, payload, {"Content-Disposition": disposition}, 1
+    @staticmethod
+    def _disposition(name, extension):
+        filename = (slug(name, ()) or "board") + extension  # letters, digits and hyphens: safe anywhere
+        return f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"
 
     def api_export_board(self, board):
+        fmt = formats.get_format(self._param("format", "laneboard") or "laneboard", "export")
         found = self.store.get_board(board)
-        return self._download(found, found["name"])
+        # Always a download, never shown in place, and sandboxed should anything open it: a web page export
+        # carries card text, and card text is never trusted.
+        self._send(200, fmt.export(found), fmt.mime, extra={
+            "Cache-Control": "no-store", "Content-Disposition": self._disposition(found["name"], fmt.extension),
+            "Content-Security-Policy": "sandbox"})
 
     def api_export_all(self):
-        return self._download(self.store.all_data(), "all-boards")
+        if (self._param("format", "laneboard") or "laneboard").strip().lower() != "laneboard":
+            raise HttpError(400, "The whole file exports only as Laneboard JSON. Export one board at a time for "
+                                 "the other formats.")
+        return 200, self.store.all_data(), {"Content-Disposition": self._disposition("all-boards", ".json")}, 1
+
+    def api_list_formats(self):
+        return 200, {"formats": [f.info() for f in formats.FORMATS.values()]}
 
     def api_import_file(self):
-        boards = self.store.import_data(self._body(limit=MAX_IMPORT))
-        return 201, {"boards": [{"id": b["id"], "name": b["name"], "cards": len(b["cards"])} for b in boards]}
+        name = (self._param("format", "auto") or "auto").strip().lower()
+        preview = self._flag("preview", "preview must be 1 (only show what would be added) or 0 (add it).")
+        filename = self._param("filename")[:255] or None  # only its ending is used, as a hint to the format
+        fmt, result = formats.import_file(self._file(MAX_IMPORT), name, filename)
+        boards = self.store.import_boards(result.boards, preview=preview)
+        if preview:
+            return 200, {"format": fmt, "boards": [outline(b) for b in boards], "warnings": result.warnings}
+        return 201, {"boards": [{"id": b["id"], "name": b["name"], "cards": len(b["cards"])} for b in boards],
+                     "format": fmt, "warnings": result.warnings}
+
+    def api_board_summary(self, board):
+        return 200, {"summary": stats.summarize(self.store.get_board(board))}
 
     def api_search_board(self, board):
         text, sort, archived = self._search_params()

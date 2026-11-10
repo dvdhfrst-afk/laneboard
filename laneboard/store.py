@@ -23,10 +23,10 @@ from .templates import (BUILTIN_IDS, board_from_template, builtin_templates, des
 from .schema import (BadFile, Conflict, NotFound, StaleRevision, StoreError, Unavailable,  # noqa: F401 (re-exported)
                      CARD_FACE_PARTS, COLORS, ID_RE, KEY_RE, LIMIT_POLICIES, LINK_RE, MAX_BOARDS, MAX_CARD_LABELS,
                      MAX_CARDS, MAX_CHECK_ITEMS, MAX_CHECK_TEXT, MAX_CHECKLIST_NAME, MAX_CHECKLISTS, MAX_COLUMN_LIMIT,
-                     MAX_COLUMN_NAME, MAX_COLUMNS, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS, MAX_LABEL_NAME, MAX_LABELS,
-                     MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS,
-                     MAX_TEMPLATES, MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE, SCHEMA_VERSION, default_settings, key_sort,
-                     now, rows, slug, text)
+                     MAX_COLUMN_NAME, MAX_COLUMNS, MAX_FIELD_TEXT, MAX_GROUP_LABEL, MAX_GROUP_NAME, MAX_GROUPS,
+                     MAX_LABEL_NAME, MAX_LABELS, MAX_NAME, MAX_QUERY, MAX_ROWS, MAX_SECTION_NAME, MAX_SORT, MAX_SUMMARY,
+                     MAX_TASK_TEXT, MAX_TASKS, MAX_TEMPLATES, MAX_TEXT, MAX_TITLE, MAX_VIEW_NAME, MAX_VIEWS, PREFIX_RE,
+                     SCHEMA_VERSION, default_settings, key_sort, now, rows, slug, text)
 
 DEFAULT_COLUMNS = [("Backlog", None), ("Ready", None), ("In progress", 1), ("Review", None), ("Done", None)]
 
@@ -89,6 +89,19 @@ def restore_backup(path, name):
     except OSError as e:
         raise Unavailable(f"Can't restore over {path}: {storage.reason(e)}. Nothing was changed.") from e
     return {"boards": len(data["boards"]), "cards": sum(len(b["cards"]) for b in data["boards"]), "kept": kept}
+
+
+def outline(board):
+    """What adding a board would add, for an import preview: {name, columns: [{name, cards}], cards, archived,
+    labels: [name], properties: [{name, type}]}. A column's count leaves out archived cards; `cards` has them all."""
+    held = {c["id"]: 0 for c in board["columns"]}
+    for card in board["cards"]:
+        if not card["archived"] and card["column"] in held:
+            held[card["column"]] += 1
+    return {"name": board["name"], "columns": [{"name": c["name"], "cards": held[c["id"]]} for c in board["columns"]],
+            "cards": len(board["cards"]), "archived": sum(1 for c in board["cards"] if c["archived"]),
+            "labels": [lab["name"] for lab in board["labels"]],
+            "properties": [{"name": p["name"], "type": p["type"]} for p in board["properties"]]}
 
 
 class Store:
@@ -241,9 +254,12 @@ class Store:
 
     def _add_boards(self, boards):
         with self._changing():
-            if len(self.data["boards"]) + len(boards) > MAX_BOARDS:
-                raise Conflict(f"A file can hold at most {MAX_BOARDS} boards.")
+            self._room_for(len(boards))
             self._save({**self.data, "boards": self.data["boards"] + boards})
+
+    def _room_for(self, n):
+        if len(self.data["boards"]) + n > MAX_BOARDS:
+            raise Conflict(f"A file can hold at most {MAX_BOARDS} boards.")
 
     def create_board(self, name, description=None, template=None):
         """Add a board. With `template` (a template's id or name) it gets that template's structure and starter
@@ -324,15 +340,26 @@ class Store:
                 raise StoreError(f"That file was written by a newer Laneboard (file format {version}; this one "
                                  f"reads up to {SCHEMA_VERSION}). Update Laneboard to import it.")
             incoming = data["boards"]
-            if not incoming:
-                raise StoreError("That file has no boards in it.")
         else:
             incoming = [data]
-        boards = []
-        for i, raw in enumerate(incoming):
-            boards.append(self._imported_board(raw, i + 1 if len(incoming) > 1 else None))
-        self._add_boards(boards)
-        return boards
+        return self.import_boards(incoming)
+
+    def import_boards(self, boards, preview=False):
+        """Add boards in the import shape, as the formats read them: all of them or none. Returns them as added.
+
+        With `preview` they are checked exactly the same way, and returned as they would be added, but
+        nothing is saved.
+        """
+        if not boards:
+            raise StoreError("That file has no boards in it.")
+        made = [self._imported_board(raw, i + 1 if len(boards) > 1 else None) for i, raw in enumerate(boards)]
+        if preview:
+            with self._lock:
+                self._refresh()
+                self._room_for(len(made))
+        else:
+            self._add_boards(made)
+        return made
 
     def import_board(self, board):
         """Add a board from an exported JSON object. It gets a new id; card keys are kept."""
@@ -832,7 +859,7 @@ class Store:
             color = g.get("color") or COLORS[(len(names) - 1) % len(COLORS)]  # a hand-written file needn't choose
             if not isinstance(color, str) or color not in COLORS:
                 raise StoreError(f"That isn't one of the colors: {', '.join(COLORS)}.")
-            link = text(g.get("link"), "Link", 500)
+            link = text(g.get("link"), "Link", MAX_FIELD_TEXT)
             if link and not LINK_RE.fullmatch(link):
                 raise StoreError("Links must start with http:// or https:// and have no spaces.")
             gid = g.get("id")
@@ -840,7 +867,7 @@ class Store:
                 gid = slug(name, taken)
             taken.add(gid)
             out.append({"id": gid, "name": name, "prefix": self._prefix(g.get("prefix"), f"The key prefix for {name}"),
-                        "color": color, "link": link, "details": rows(g.get("details"), f"{name} details", "value", 500)})
+                        "color": color, "link": link, "details": rows(g.get("details"), f"{name} details", "value", MAX_FIELD_TEXT)})
         return out
 
     def _apply_groups(self, board, groups):
@@ -943,9 +970,9 @@ class Store:
         if "summary" in values:
             out["summary"] = text(values["summary"], "Summary", MAX_SUMMARY, multiline=True)
         if "blocked" in values:
-            out["blocked"] = text(values["blocked"], "Blocked by", 500)
+            out["blocked"] = text(values["blocked"], "Blocked by", MAX_FIELD_TEXT)
         if "fields" in values:
-            out["fields"] = rows(values["fields"], "Fields", "value", 500)
+            out["fields"] = rows(values["fields"], "Fields", "value", MAX_FIELD_TEXT)
         if "sections" in values:
             out["sections"] = rows(values["sections"], "Sections", "body", MAX_TEXT)
         if "notes" in values:
@@ -976,8 +1003,8 @@ class Store:
                 "group": self._group_id(board, values.get("group")), "column": self._column_id(board, column),
                 "rank": None if rank is None else schema.rank(rank),
                 "summary": text(values.get("summary"), "Summary", MAX_SUMMARY, multiline=True),
-                "blocked": text(values.get("blocked"), "Blocked by", 500),
-                "fields": rows(values.get("fields"), "Fields", "value", 500),
+                "blocked": text(values.get("blocked"), "Blocked by", MAX_FIELD_TEXT),
+                "fields": rows(values.get("fields"), "Fields", "value", MAX_FIELD_TEXT),
                 "sections": rows(values.get("sections"), "Sections", "body", MAX_TEXT),
                 "notes": text(values.get("notes"), "Notes", MAX_TEXT, multiline=True),
                 "checks": self._checks(board, values.get("checks"), items),

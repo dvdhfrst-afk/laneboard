@@ -154,6 +154,33 @@ laneboard search "upgrade OR session"
 laneboard cards "Software release" --query "group:web OR is:blocked" --sort title
 ```
 
+## Import and export
+
+`laneboard export BOARD --format F` writes a board in one of these formats, and `laneboard import FILE`
+reads the ones that go the other way. An import tells the format from the file, or takes `--format`.
+It adds everything or nothing, never changes a board you have, and says what it left out.
+`--preview` shows what an import would add without adding it.
+
+| Format | `--format` | Export | Import | What it keeps | What it leaves out |
+|---|---|---|---|---|---|
+| Laneboard JSON | `laneboard` | yes | yes | Everything on the board | Nothing |
+| Markdown | `markdown` | yes | yes | A document to read, with every column and card, and a block of board settings at the end. It imports back as the same board: columns, groups, labels, properties, saved views, settings, checklists, and each card's key, column, labels, values, summary, fields, sections, tasks, ticks and notes. A plain Markdown task list imports too: headings become columns, list items cards, and ticked items go to the last column | The times cards were created and last changed; the board copy gets new ones |
+| Web page | `html` | yes | no | A page to read or print: the board's numbers, every column and card, archived cards and groups. It runs no script and loads nothing | Saved views and settings. Archived cards show only their key, title and column |
+| Plain text | `text` | yes | no | Each column with its count, then one line per card with its key, title and labels, for pasting into a message | Everything else on a card, and archived cards |
+| Trello | `trello` | no | yes | From Trello's Export as JSON: open lists as columns, cards with their name, description (as notes), labels (in the nearest color), checklists (as tasks) and archived state, and custom fields of the text, number, checkbox and list kinds | Archived lists (their cards come in archived), due dates, members, attachments, votes, stickers, comments, and other kinds of custom field. Trello due dates are not imported |
+| GitHub issues | `github` | no | yes | The JSON from `gh issue list --json number,title,body,labels,state,url,milestone,assignees`: open issues in the first column and closed ones in the last, the issue number as the key (`GH-12`), labels, the body as notes, the address as a Link field, and the milestone and assignees as properties | Anything else the issue has |
+
+```bash
+laneboard export "Software release" --format markdown -o release.md
+```
+
+```bash
+laneboard import release.md --preview
+```
+
+`laneboard stats BOARD` prints a board's numbers: cards and limits per column with number totals, cards
+per group and label, how each property is filled in, and tasks and checklist ticks done.
+
 ## Where your boards are kept
 
 All boards live in one file, outside this folder:
@@ -222,8 +249,9 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard properties BOARD` | List properties. `--add NAME --type TYPE` (with `--choices`, `--min`, `--max`, `--decimals`, `--unit`), `--rename OLD=NEW`, `--remove NAME` |
 | `laneboard views BOARD` | List saved views. `--add NAME --query Q` (with `--sort`), `--remove NAME`, `--default NAME` or `none` |
 | `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C`, `--default VIEW` or `none` |
-| `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing |
-| `laneboard export BOARD` | Write a board as JSON. `-o FILE`, `--force`, or `--all` for every board |
+| `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing. `--format F` (default `auto`), `--preview` |
+| `laneboard export BOARD` | Write a board. `--format F` (default `laneboard`), `-o FILE`, `--force`, or `--all` for every board as Laneboard JSON |
+| `laneboard stats BOARD` | A board's numbers: columns, groups, labels, properties, tasks and ticks. `--json` |
 | `laneboard sample [NAME]` | List the example boards, or add one |
 | `laneboard backups` | List the copies you can go back to |
 | `laneboard restore NAME` | Go back to one |
