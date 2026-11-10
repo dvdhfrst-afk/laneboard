@@ -223,6 +223,11 @@ class LabelsTest(Case):
         self.unchanged("labels", "Work", "--rename", "Bug", code=2, says="--rename takes OLD=NEW")
         self.unchanged("labels", "Work", "--rename", "Nope=X", says="Work has no label called 'Nope'. It has: Bug.")
         self.unchanged("labels", "Work", "--remove", "Nope", says="no label called 'Nope'")
+        # An empty name is a mistake to point out, not "no option given": a script with an empty variable must hear of it.
+        self.unchanged("labels", "Work", "--add", "", says="Label name can't be empty.")
+        self.unchanged("labels", "Work", "--add", "", "--color", "rose", says="Label name can't be empty.")
+        self.unchanged("labels", "Work", "--remove", "", says="no label called ''")
+        self.unchanged("labels", "Work", "--rename", "", code=2, says="--rename takes OLD=NEW")
 
 
 class PropertiesTest(Case):
@@ -259,6 +264,9 @@ class PropertiesTest(Case):
         self.unchanged("properties", "Work", "--add", "Stage", "--type", "choice", says="Stage needs at least one choice.")
         self.unchanged("properties", "Work", "--add", "points", "--type", "text", says="two properties named")
         self.unchanged("properties", "Work", "--remove", "Size", says="Work has no property called 'Size'. It has: Points.")
+        self.unchanged("properties", "Work", "--add", "", "--type", "text", says="Property name can't be empty.")
+        self.unchanged("properties", "Work", "--remove", "", says="no property called ''")
+        self.unchanged("properties", "Work", "--rename", "", code=2, says="--rename takes OLD=NEW")
 
 
 class ViewsTest(Case):
@@ -290,6 +298,8 @@ class ViewsTest(Case):
         self.unchanged("views", "Work", "--add", "mine", "--query", "y", says="two saved views named")
         self.unchanged("views", "Work", "--remove", "Yours", says="Work has no saved view called 'Yours'. It has: Mine.")
         self.unchanged("views", "Work", "--default", "Yours", says='There\'s no saved view called "Yours". Saved views: Mine.')
+        self.unchanged("views", "Work", "--add", "", "--query", "x", says="View name can't be empty.")
+        self.unchanged("views", "Work", "--remove", "", says="no saved view called ''")
 
 
 class SettingsTest(Case):

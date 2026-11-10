@@ -15,7 +15,7 @@ from ..schema import COLORS, LINK_RE
 from .common import Format, Lookups, archived_cards, columns_with_cards
 
 _LINK = re.compile(r"(https?://[^\s<>\"'`)\]]+)")
-_ENDING = re.compile(r"[.,;:!?]+$")  # the period ending a sentence isn't part of the address
+_ENDING = ".,;:!?"  # the period ending a sentence isn't part of the address
 
 CSS = """
 :root {
@@ -111,9 +111,8 @@ def rich(text):
             if not j % 2:
                 out.append(_e(bit))
                 continue
-            ending = _ENDING.search(bit)
-            tail = ending.group(0) if ending else ""
-            url = bit[:len(bit) - len(tail)]
+            url = bit.rstrip(_ENDING)  # not a regular expression: one on a long run of dots took seconds
+            tail = bit[len(url):]
             out.append(f'<a href="{_e(url)}" rel="noopener noreferrer">{_e(url)}</a>{_e(tail)}')
     return "".join(out)
 

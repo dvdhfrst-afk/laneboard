@@ -524,9 +524,9 @@ def cmd_templates(args):
 
 
 def cmd_labels(args):
-    if args.color and not args.add:
+    if args.color and args.add is None:
         args.parser.error("--color goes with --add")
-    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename else None
+    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename is not None else None
     store = Store(args.data, starter=False)
     board_id = find_board(store, args.board)
     said = []
@@ -540,18 +540,18 @@ def cmd_labels(args):
                 if lab["id"] == lid:
                     said.append(f"Renamed {lab['name']} to {rename[1].strip()}.")
                     lab["name"] = rename[1]
-        if args.remove:
+        if args.remove is not None:
             lid = find_named(board["labels"], args.remove, "label", board)
             used = sum(1 for c in board["cards"] if lid in c["labels"])
             said.append(f"Removed {next(lab['name'] for lab in labels if lab['id'] == lid)}"
                         + (f" from the board and from {count(used, 'card')}." if used else "."))
             labels = [lab for lab in labels if lab["id"] != lid]
-        if args.add:
+        if args.add is not None:
             labels.append({"name": args.add, "color": args.color})
             said.append(f"Added {args.add.strip()}.")
         return store.update_board(board["id"], {"labels": labels}, rev=board["rev"])
 
-    if rename or args.remove or args.add:
+    if rename or args.remove is not None or args.add is not None:
         board = changing(store, board_id, build)
         print("\n".join(said))
         return
@@ -578,14 +578,14 @@ def describe_property(prop):
 
 def cmd_properties(args):
     given = {key: getattr(args, key) for key in PROPERTY_OPTIONS if getattr(args, key) is not None}
-    if (args.type or given) and not args.add:
+    if (args.type or given) and args.add is None:
         args.parser.error("--type, --choices, --min, --max, --decimals and --unit go with --add")
-    if args.add and not args.type:
+    if args.add is not None and not args.type:
         args.parser.error("--add needs --type, one of " + ", ".join(TYPE_NAMES))
-    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename else None
+    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename is not None else None
     if "choices" in given:
         given["choices"] = [c.strip() for c in given["choices"].split(",") if c.strip()]
-    if args.add:
+    if args.add is not None:
         made = TYPES[args.type].clean_definition({"name": args.add, "type": args.type, **given})  # checks the options
         unused = [f"--{key}" for key in given if key not in made]
         if unused:
@@ -603,17 +603,17 @@ def cmd_properties(args):
                 if prop["id"] == pid:
                     said.append(f"Renamed {prop['name']} to {rename[1].strip()}.")
                     prop["name"] = rename[1]
-        if args.remove:
+        if args.remove is not None:
             prop = property_named(board, args.remove)
             used = sum(1 for c in board["cards"] if prop["id"] in c["properties"])
             said.append(f"Removed {prop['name']}" + (f" from the board and cleared it on {count(used, 'card')}." if used else "."))
             props = [p for p in props if p["id"] != prop["id"]]
-        if args.add:
+        if args.add is not None:
             props.append({"name": args.add, "type": args.type, **given})
             said.append(f"Added {args.add.strip()}.")
         return store.update_board(board["id"], {"properties": props}, rev=board["rev"])
 
-    if rename or args.remove or args.add:
+    if rename or args.remove is not None or args.add is not None:
         changing(store, board_id, build)
         print("\n".join(said))
         return
@@ -645,9 +645,9 @@ def opens_with(board):
 
 
 def cmd_views(args):
-    if (args.query is not None or args.sort is not None) and not args.add:
+    if (args.query is not None or args.sort is not None) and args.add is None:
         args.parser.error("--query and --sort go with --add")
-    if args.add and args.query is None:
+    if args.add is not None and args.query is None:
         args.parser.error("--add needs --query (it can be \"\" for every card)")
     store = Store(args.data, starter=False)
     board_id = find_board(store, args.board)
@@ -657,14 +657,14 @@ def cmd_views(args):
         said.clear()
         views = [dict(v) for v in board["views"]]
         changes = {}
-        if args.remove:
+        if args.remove is not None:
             vid = find_named(board["views"], args.remove, "saved view", board)
             said.append(f"Removed {next(v['name'] for v in views if v['id'] == vid)}.")
             views = [v for v in views if v["id"] != vid]
-        if args.add:
+        if args.add is not None:
             views.append({"name": args.add, "query": args.query, "sort": args.sort or ""})
             said.append(f"Added {args.add.strip()}.")
-        if args.remove or args.add:
+        if args.remove is not None or args.add is not None:
             changes["views"] = views
         if args.default is not None:
             changes["settings"] = {"defaultView": default_view(args.default)}
@@ -673,7 +673,7 @@ def cmd_views(args):
             said.append(opens_with(updated))
         return updated
 
-    if args.remove or args.add or args.default is not None:
+    if args.remove is not None or args.add is not None or args.default is not None:
         try:
             changing(store, board_id, build)
         except QueryError as e:  # the new view's search or sort can't be read
@@ -877,7 +877,7 @@ def build_parser():
     default = default_data_path()
     common = Parser(add_help=False)
     # On every command, so `laneboard boards --data x` works as well as `laneboard --data x boards`.
-    common.add_argument("--data", metavar="FILE", default=argparse.SUPPRESS,
+    common.add_argument("--data", metavar="FILE", type=data_file, default=argparse.SUPPRESS,
                         help="boards file (default: $LANEBOARD_DATA, or " + default.replace("%", "%%") + ")")
 
     def run_options(p):
@@ -1034,6 +1034,13 @@ def build_parser():
     p.add_argument("--json", action="store_true", help="print JSON")
     command("check", cmd_check, "check that the boards file can be read")
     return parser
+
+
+def data_file(value):
+    # Not the default file: a script whose variable for the file name came out empty would change the usual boards.
+    if not value.strip():
+        raise argparse.ArgumentTypeError("needs the name of a boards file")
+    return value
 
 
 def port_number(value):

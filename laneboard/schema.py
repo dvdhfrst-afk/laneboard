@@ -162,6 +162,11 @@ def slug(name, taken):
     return made
 
 
+def tickable_ids(board):
+    """Ids of the checklist lines a card can tick (headings can't be ticked)."""
+    return {item.get("id") for cl in board.get("checklists") or [] for item in cl.get("items") or [] if not item.get("heading")}
+
+
 def key_sort(key):
     """Sort T-2 before T-10."""
     m = ANY_KEY_RE.fullmatch(key)

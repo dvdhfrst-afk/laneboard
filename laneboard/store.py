@@ -140,8 +140,10 @@ class Store:
 
     def _read(self):
         try:
-            raw = _read_bytes(self.path)
+            # The stamp first: a save landing between the two then looks like a change still to pick up. Taken
+            # after, it would mark the newer file as read while the bytes in hand are the older one.
             stamp = self._file_stamp()
+            raw = _read_bytes(self.path)
         except OSError as e:
             raise Unavailable(f"Can't read {self.path}: {storage.reason(e)}.") from e
         try:
@@ -276,7 +278,7 @@ class Store:
                 chosen = get_template(self.data["templates"], template)
             name = text(name, "Board name", MAX_NAME) or None
             description = None if description is None else text(description, "Description", MAX_SUMMARY)
-            board = self._imported_board(board_from_template(chosen, name, description))
+            board = self._imported_board(board_from_template(chosen, name, description), typed=True)
         self._add_boards([board])
         return board
 
@@ -304,7 +306,7 @@ class Store:
                 board["template"] = self._template(changes["template"])
             if "checklists" in changes:
                 board["checklists"] = self._checklists(changes["checklists"])
-                items = self._check_ids(board)
+                items = schema.tickable_ids(board)
                 board["cards"] = [c if all(i in items for i in c["checks"])
                                   else {**c, "checks": [i for i in c["checks"] if i in items]} for c in board["cards"]]
             # Settings last: the card face and the default view can name properties and views added in the same change.
@@ -367,12 +369,13 @@ class Store:
         self._add_boards([made])
         return made
 
-    def _imported_board(self, board, number=None, check_views=True):
+    def _imported_board(self, board, number=None, check_views=True, typed=False):
         """Build a board from untrusted JSON. Everything is validated; only known fields are kept.
 
         Takes the loose import shape (see docs/file-format.md) as well as a board exactly as exported.
         `number` is the board's place in a file of several. Errors name the board, and the card and part.
-        Without `check_views`, saved views that don't work are kept for the caller to look at.
+        Without `check_views`, saved views that don't work are kept for the caller to look at. With `typed`, card
+        property values given as text are read as typed first, as a template's starter cards keep them.
         """
         label = f"Board number {number}" if number else None
         try:
@@ -386,7 +389,11 @@ class Store:
             draft = self._imported_parts(board, name)
         except StoreError as e:
             raise type(e)(f"{where}: {e}") from e
-        items = self._check_ids(draft)
+        items = schema.tickable_ids(draft)
+        listed = board.get("labels") if isinstance(board.get("labels"), list) else []
+        given_ids = {lab["id"] for lab in listed if isinstance(lab, dict) and isinstance(lab.get("id"), str)}
+        given_ids &= {lab["id"] for lab in draft["labels"]}
+        made_ids = {lab["id"] for lab in draft["labels"]} - given_ids
         column_names = {c["name"].lower(): c["id"] for c in draft["columns"]}
         group_names = {g["name"].lower(): g["id"] for g in draft["groups"]}
         seen, top_rank, built = set(), 0, []
@@ -403,9 +410,9 @@ class Store:
                 if values.get("rank") is None:
                     values["rank"] = top_rank + 1
                 if "labels" in values:
-                    values["labels"] = self._imported_labels(draft, values["labels"])
+                    values["labels"] = self._imported_labels(draft, values["labels"], given_ids, made_ids)
                 if "properties" in values:
-                    values["properties"] = self._imported_values(draft, values["properties"])
+                    values["properties"] = self._imported_values(draft, values["properties"], typed)
                 card = self._new_card(draft, values, items)
                 top_rank = max(top_rank, card["rank"])
                 key = raw.get("key")
@@ -491,20 +498,36 @@ class Store:
                     draft["counters"][prefix] = number
         return draft
 
-    def _imported_labels(self, draft, value):
-        """Card labels from an import, by id or name. A name the board doesn't have yet becomes a new label."""
+    def _imported_labels(self, draft, value, given_ids, made_ids):
+        """Card labels from an import, by id or name. A name the board doesn't have yet becomes a new label.
+
+        An id the file gave a label comes first, then a label's name, then an id made up for a label the file
+        listed without one: the file can't mean a made-up id over a name, so "front-end" beside "Front end"
+        (whose made-up id is front-end) is the label called front-end."""
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise StoreError("Labels must be a list of label names or ids.")
-        for given in value:
+
+        def meant(given):
+            if given in given_ids:
+                return given
             wanted = given.strip().casefold()
-            if not any(lab["id"] == given or lab["name"].casefold() == wanted for lab in draft["labels"]):
+            named = next((lab["id"] for lab in draft["labels"] if lab["name"].casefold() == wanted), None)
+            return named if named is not None or given not in made_ids else given
+
+        picked = []
+        for given in value:
+            found = meant(given)
+            if found is None:
                 draft["labels"] = self._labels(draft, draft["labels"] + [{"name": given}], keep_ids=True)
-        return self._card_labels(draft, value)
+                found = meant(given)
+            picked.append(given if found is None else found)
+        return self._card_labels(draft, picked)
 
     @staticmethod
-    def _imported_values(draft, value):
+    def _imported_values(draft, value, typed=False):
         """Card property values from an import, keyed by property name or id. Each value is tried as a stored
-        value first, then as the text form people type (so "3", "yes" and "iOS, Web" all work)."""
+        value first, then as the text form people type (so "3", "yes" and "iOS, Web" all work). With `typed`, text
+        is tried as typed first: a choice named like another choice's id then means the one with that name."""
         if not isinstance(value, dict):
             raise StoreError("Properties must map property names to values.")
         out = {}
@@ -513,12 +536,13 @@ class Store:
             if prop is None:
                 raise StoreError(f'There\'s no property called "{_shown(given)}". {_listed("Properties", draft["properties"])}')
             kind = TYPES[prop["type"]]
+            first, then = (kind.parse_text, kind.clean_value) if typed and isinstance(raw, str) else (kind.clean_value, kind.parse_text)
             try:
-                cleaned = kind.clean_value(raw, prop)
+                cleaned = first(raw, prop)
             except StoreError:
                 if not isinstance(raw, str):
                     raise
-                cleaned = kind.parse_text(raw, prop)
+                cleaned = then(raw, prop)
             if cleaned is None:
                 out.pop(prop["id"], None)
             else:
@@ -564,7 +588,7 @@ class Store:
 
     def _template_board(self, template):
         """The board a template makes, checked as an import is but with its views not yet read: (board, broken views)."""
-        draft = self._imported_board(board_from_template(template), check_views=False)
+        draft = self._imported_board(board_from_template(template), check_views=False, typed=True)
         return draft, broken_views(draft)
 
     def template_troubles(self):
@@ -632,7 +656,7 @@ class Store:
         def apply(board):
             if len(board["cards"]) >= MAX_CARDS:
                 raise Conflict(f"A board can have at most {MAX_CARDS} cards. Delete or move some first.")
-            card = self._new_card(board, values, self._check_ids(board))
+            card = self._new_card(board, values, schema.tickable_ids(board))
             self._check_room(board, card["column"])
             if card["rank"] is None:
                 card["rank"] = max((c["rank"] for c in board["cards"]), default=0) + 1
@@ -968,10 +992,6 @@ class Store:
         return out
 
     @staticmethod
-    def _check_ids(board):
-        return {i["id"] for cl in board["checklists"] for i in cl["items"] if not i["heading"]}
-
-    @staticmethod
     def _column_id(board, value):
         if not isinstance(value, str) or value not in {c["id"] for c in board["columns"]}:
             raise StoreError("That column doesn't exist on this board.")
@@ -1021,7 +1041,7 @@ class Store:
             checks = []
         if not isinstance(checks, list) or not all(isinstance(c, str) for c in checks):
             raise StoreError("Checks must be a list of checklist item ids.")
-        items = self._check_ids(board) if items is None else items
+        items = schema.tickable_ids(board) if items is None else items
         return [c for c in dict.fromkeys(checks) if c in items]  # drop ticks for lines that no longer exist
 
     def _new_card(self, board, values, items):
@@ -1435,6 +1455,14 @@ class Store:
         """A value from another board's property, made to fit `prop`: by its text first (choices by name), then
         as it was stored (a number into a property with another unit). None if neither fits."""
         kind = TYPES[prop["type"]]
+        if "choices" in prop:  # by name only: an id here can be a renamed choice's, so it says nothing about the name
+            try:
+                fitted = kind.parse_text(shown, prop)
+            except StoreError:
+                return None
+            got = None if fitted is None else kind.format_text(fitted, prop)
+            same = got is not None and {n.strip().casefold() for n in got.split(",")} == {n.strip().casefold() for n in shown.split(",")}
+            return fitted if same else None
         for attempt in (lambda: kind.parse_text(shown, prop), lambda: kind.clean_value(value, prop)):
             try:
                 fitted = attempt()
