@@ -15,7 +15,8 @@ from unittest import mock
 from laneboard import __version__, cli
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-COMMANDS = ["serve", "boards", "cards", "add", "move", "archive", "import", "export", "sample", "backups", "restore", "check"]
+COMMANDS = ["serve", "boards", "cards", "add", "move", "archive", "show", "edit", "delete", "task", "transfer", "new",
+            "labels", "properties", "views", "settings", "import", "export", "sample", "backups", "restore", "check"]
 
 
 def free_port():

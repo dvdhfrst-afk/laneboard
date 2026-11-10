@@ -10,7 +10,7 @@ import math
 import re
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 COLORS = ("blue", "teal", "violet", "amber", "rose", "green", "slate")
 PREFIX_RE = re.compile(r"[A-Z][A-Z0-9]{0,7}")
@@ -32,6 +32,19 @@ MAX_ROWS = 30  # fields, sections, details
 MAX_CHECKLISTS = 10
 MAX_CHECK_ITEMS = 100
 MAX_RANK = 1e15
+MAX_LABELS = 50
+MAX_LABEL_NAME = 40
+MAX_CARD_LABELS = 20
+MAX_VIEWS = 30
+MAX_VIEW_NAME = 60
+MAX_QUERY = 500
+MAX_SORT = 200
+MAX_TASKS = 100
+MAX_TASK_TEXT = 300
+
+# What a card can show on the board, besides property values. settings.cardFace lists these and property ids.
+CARD_FACE_PARTS = ("group", "labels", "field", "progress", "blocked")
+LIMIT_POLICIES = ("warn", "refuse")
 
 # Card properties (laneboard/properties.py checks and cleans them)
 MAX_PROPERTIES = 30
@@ -76,6 +89,11 @@ class Unavailable(StoreError):
 
 class BadFile(Unavailable):
     """The boards file (or a backup) isn't something Laneboard can safely use."""
+
+
+def default_settings():
+    """A board's settings when nothing has been chosen: today's card face, and full columns only flagged."""
+    return {"cardFace": list(CARD_FACE_PARTS), "limitPolicy": "warn", "defaultView": None}
 
 
 def now() -> str:
@@ -140,15 +158,19 @@ def key_sort(key):
     return (m.group(1), int(m.group(2))) if m else (key, 0)
 
 
-def parse_json(raw: bytes, where: str):
-    """Parse JSON bytes from a file. Handles the BOMs that Notepad and PowerShell add."""
+def decode_text(raw: bytes, where: str) -> str:
+    """Text from a file's bytes: UTF-8, or the UTF-16 that PowerShell redirection writes, without a BOM."""
     try:
         if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
-            content = raw.decode("utf-16")
-        else:
-            content = raw.decode("utf-8-sig")
+            return raw.decode("utf-16")
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError as e:
         raise BadFile(f"{where} isn't UTF-8 text ({e.reason} at byte {e.start}).") from e
+
+
+def parse_json(raw: bytes, where: str):
+    """Parse JSON bytes from a file. Handles the BOMs that Notepad and PowerShell add."""
+    content = decode_text(raw, where)
     if not content.strip():
         raise BadFile(f"{where} is empty.")
     try:
@@ -177,7 +199,23 @@ def _upgrade_1_to_2(data):
                     card.setdefault("archived", None)
 
 
-UPGRADES = {1: _upgrade_1_to_2}
+def _upgrade_2_to_3(data):
+    """Version 3 adds labels, properties, saved views and settings to boards; labels, properties and tasks to
+    cards; and a list of saved templates to the file. Everything starts empty, so nothing on a board changes."""
+    data.setdefault("templates", [])
+    for board in data["boards"]:
+        if isinstance(board, dict):
+            for name in ("labels", "properties", "views"):
+                board.setdefault(name, [])
+            board.setdefault("settings", default_settings())
+            for card in board.get("cards") if isinstance(board.get("cards"), list) else []:
+                if isinstance(card, dict):
+                    card.setdefault("labels", [])
+                    card.setdefault("properties", {})
+                    card.setdefault("tasks", [])
+
+
+UPGRADES = {1: _upgrade_1_to_2, 2: _upgrade_2_to_3}
 
 
 def upgrade(data, where):
@@ -270,7 +308,66 @@ def _check_checklists(board, where):
             item["heading"] = bool(item.get("heading"))
 
 
-def _check_card(card, index, board, where, column_ids, group_ids):
+def _check_labels(board, where):
+    labels = board.setdefault("labels", [])
+    _require(isinstance(labels, list), where, "labels must be a list.")
+    seen = set()
+    for label in labels:
+        _require(isinstance(label, dict) and _is_str(label.get("id")) and label["id"] and _is_str(label.get("name")),
+                 where, "each label needs an id and a name.")
+        _require(label["id"] not in seen, where, f"two labels share the id {label['id']!r}.")
+        seen.add(label["id"])
+        label.setdefault("color", "slate")
+        _require(label["color"] in COLORS, where, f"label {label['name']!r} has an unknown color.")
+    return seen
+
+
+def _check_views(board, where):
+    views = board.setdefault("views", [])
+    _require(isinstance(views, list), where, "views must be a list.")
+    seen = set()
+    for view in views:
+        _require(isinstance(view, dict) and _is_str(view.get("id")) and view["id"] and _is_str(view.get("name")),
+                 where, "each saved view needs an id and a name.")
+        _require(view["id"] not in seen, where, f"two saved views share the id {view['id']!r}.")
+        seen.add(view["id"])
+        for name in ("query", "sort"):
+            view.setdefault(name, "")
+            _require(_is_str(view[name]), where, f"the {name} of saved view {view['name']!r} must be text.")
+    return seen
+
+
+def _check_settings(board, where, view_ids):
+    """After the properties are checked: the card face can name them."""
+    settings = board.setdefault("settings", default_settings())
+    _require(isinstance(settings, dict), where, "settings must be an object.")
+    face = settings.setdefault("cardFace", list(CARD_FACE_PARTS))
+    _require(isinstance(face, list) and all(_is_str(part) for part in face), where, "settings.cardFace must be a list of names.")
+    known = set(CARD_FACE_PARTS) | {p["id"] for p in board["properties"]}
+    for part in face:
+        _require(part in known, where, f"settings.cardFace lists {part!r}, which isn't a part of a card or one of its properties.")
+    _require(len(set(face)) == len(face), where, "settings.cardFace lists something twice.")
+    settings.setdefault("limitPolicy", "warn")
+    _require(settings["limitPolicy"] in LIMIT_POLICIES, where, f"settings.limitPolicy must be {' or '.join(LIMIT_POLICIES)}.")
+    settings.setdefault("defaultView", None)
+    view = settings["defaultView"]
+    _require(view is None or (_is_str(view) and view in view_ids), where, "settings.defaultView must be null or the id of one of its saved views.")
+
+
+def _check_tasks(card, where):
+    tasks = card.setdefault("tasks", [])
+    _require(isinstance(tasks, list), where, "tasks must be a list.")
+    seen = set()
+    for task in tasks:
+        _require(isinstance(task, dict) and _is_str(task.get("id")) and task["id"] and _is_str(task.get("text")),
+                 where, "each task needs an id and text.")
+        _require(task["id"] not in seen, where, f"two tasks share the id {task['id']!r}.")
+        seen.add(task["id"])
+        task.setdefault("done", False)
+        _require(isinstance(task["done"], bool), where, f"done must be true or false on task {task['id']!r}.")
+
+
+def _check_card(card, index, board, where, column_ids, group_ids, label_ids):
     _require(isinstance(card, dict), where, f"card number {index + 1} isn't an object.")
     key = card.get("key")
     _require(_is_str(key) and ANY_KEY_RE.fullmatch(key), where, f"card number {index + 1} has no key like ABC-12.")
@@ -291,6 +388,12 @@ def _check_card(card, index, board, where, column_ids, group_ids):
     _text_rows(card["sections"], at, "sections", "body")
     card.setdefault("checks", [])
     _require(isinstance(card["checks"], list) and all(_is_str(c) for c in card["checks"]), at, "checks must be a list of ids.")
+    card.setdefault("labels", [])
+    labels = card["labels"]
+    _require(isinstance(labels, list) and all(_is_str(label) for label in labels), at, "labels must be a list of label ids.")
+    _require(all(label in label_ids for label in labels), at, "it has a label that doesn't exist on the board.")
+    _require(len(set(labels)) == len(labels), at, "it lists a label twice.")
+    _check_tasks(card, at)
     card.setdefault("archived", None)
     _require(card["archived"] is None or _is_str(card["archived"]), at, "archived must be a date or null.")
     for name in ("created", "updated"):
@@ -321,6 +424,8 @@ def check_board(board, index, known_ids, where):
     column_ids = _check_columns(board, at)
     group_ids = _check_groups(board, at)
     _check_checklists(board, at)
+    label_ids = _check_labels(board, at)
+    view_ids = _check_views(board, at)
     template = board.setdefault("template", [])
     _require(isinstance(template, list) and all(_is_str(t) for t in template), at, "template must be a list of names.")
     cards = board.get("cards", None)
@@ -329,7 +434,7 @@ def check_board(board, index, known_ids, where):
     _require(isinstance(cards, list), at, "cards must be a list.")
     keys = set()
     for i, card in enumerate(cards):
-        key = _check_card(card, i, board, at, column_ids, group_ids)
+        key = _check_card(card, i, board, at, column_ids, group_ids, label_ids)
         _require(key not in keys, at, f"two cards share the key {key}.")
         keys.add(key)
     counters = board.get("counters")
@@ -339,6 +444,18 @@ def check_board(board, index, known_ids, where):
             prefix, number = ANY_KEY_RE.fullmatch(key).groups()
             counters[prefix] = max(counters.get(prefix, 0), int(number))
     _require(isinstance(counters, dict) and all(_is_int(v) for v in counters.values()), at, "counters must map prefixes to whole numbers.")
+    from .properties import check_definitions  # here, not at the top: properties.py builds on this module
+    check_definitions(board, at)
+    _check_settings(board, at, view_ids)
+
+
+def check_templates(data, where):
+    """The file's saved templates: a list of objects, each with an id and a name."""
+    templates = data.setdefault("templates", [])
+    _require(isinstance(templates, list), where, "templates must be a list.")
+    for template in templates:
+        _require(isinstance(template, dict) and _is_str(template.get("id")) and _is_str(template.get("name")),
+                 where, "each saved template needs an id and a name.")
 
 
 def check_data(data, where):
@@ -346,6 +463,7 @@ def check_data(data, where):
     known = set()
     for i, board in enumerate(data["boards"]):
         check_board(board, i, known, where)
+    check_templates(data, where)
     return data
 
 

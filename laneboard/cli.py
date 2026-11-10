@@ -14,7 +14,8 @@ import webbrowser
 from datetime import datetime
 
 from . import __version__, samples, storage
-from .schema import NotFound, SCHEMA_VERSION, StoreError, load_bytes, parse_json
+from .properties import TYPE_NAMES, TYPES, find_property, property_text
+from .schema import CARD_FACE_PARTS, COLORS, LIMIT_POLICIES, NotFound, SCHEMA_VERSION, StaleRevision, StoreError, decode_text, load_bytes, parse_json
 from .server import BoardServer, encode_json
 from .store import Store, default_data_path, restore_backup, resolve_path
 
@@ -160,9 +161,11 @@ def cmd_boards(args):
         print("No boards yet.")
 
 
-def card_line(card, columns):
+def card_line(card, columns, labels=None):
+    names = [labels[lid] for lid in card.get("labels", ()) if lid in labels] if labels else []
+    shown = f"  [{', '.join(names)}]" if names else ""
     blocked = "  [blocked]" if card["blocked"] else ""
-    return f"{card['key']:<12} {columns.get(card['column'], card['column']):<14} {card['title']}{blocked}"
+    return f"{card['key']:<12} {columns.get(card['column'], card['column']):<14} {card['title']}{shown}{blocked}"
 
 
 def cmd_cards(args):
@@ -176,8 +179,9 @@ def cmd_cards(args):
         write_json(cards, None, False)
         return
     columns = {c["id"]: c["name"] for c in board["columns"]}
+    labels = {lab["id"]: lab["name"] for lab in board["labels"]}
     for card in cards:
-        print(card_line(card, columns))
+        print(card_line(card, columns, labels))
     if not cards:
         print("No cards to show.")
 
@@ -210,6 +214,387 @@ def cmd_archive(args):
     board_id = find_board(store, args.board)
     store.update_card(board_id, args.key, {"archived": not args.restore})
     print(f"{'Restored' if args.restore else 'Archived'} {args.key}.")
+
+
+# ---- one card ------------------------------------------------------------------------------------
+
+
+def card_of(board, key):
+    card = next((c for c in board["cards"] if c["key"] == key), None)
+    if card is None:
+        raise NotFound(f"There's no card {key} on {board['name']}.")
+    return card
+
+
+def property_named(board, name):
+    prop = find_property(board, name)
+    if prop is None:
+        names = ", ".join(p["name"] for p in board["properties"]) or "none"
+        raise NotFound(f"{board['name']} has no property called {name!r}. It has: {names}.")
+    return prop
+
+
+def changing(store, board_id, build, tries=5):
+    """Save a change worked out from the board as it is now, sent with that board's rev.
+
+    `build(board)` reads the board, makes its change with rev=board["rev"] and returns what it likes.
+    If something else (the page, another command) saves in between, the change is worked out again
+    from the newer board, so what the other one did isn't undone.
+    """
+    for attempt in range(tries):
+        try:
+            return build(store.get_board(board_id))
+        except StaleRevision:
+            if attempt == tries - 1:
+                raise
+
+
+def read_text(name):
+    """A text file, or standard input for `-`."""
+    if name == "-":
+        return decode_text(sys.stdin.buffer.read(), "Standard input")
+    try:
+        with open(name, "rb") as f:
+            return decode_text(f.read(), name)
+    except OSError as e:
+        raise StoreError(f"Can't read {name}: {storage.reason(e)}.") from e
+
+
+def indented(label, value):
+    """A labelled piece of text; a second line and later ones are indented under the label."""
+    first, *rest = value.split("\n")
+    return [f"{label}: {first}"] + ["  " + line for line in rest]
+
+
+def task_lines(card):
+    if not card["tasks"]:
+        return [f"{card['key']} has no tasks yet."]
+    return [f"{n}. [{'x' if t['done'] else ' '}] {t['text']}" for n, t in enumerate(card["tasks"], 1)]
+
+
+def card_lines(board, card):
+    """Everything on a card, as plain text."""
+    names = lambda items: {i["id"]: i["name"] for i in items}  # noqa: E731
+    out = [f"{card['key']}  {card['title']}", f"Column: {names(board['columns']).get(card['column'], card['column'])}"]
+    if card["group"]:
+        out.append(f"{board['groupLabel']}: {names(board['groups']).get(card['group'], card['group'])}")
+    labels = names(board["labels"])
+    if card["labels"]:
+        out.append("Labels: " + ", ".join(labels.get(lid, lid) for lid in card["labels"]))
+    if card["blocked"]:
+        out.append(f"Blocked by: {card['blocked']}")
+    if card["archived"]:
+        out.append(f"Archived: {card['archived']}")
+    if card["summary"]:
+        out += indented("Summary", card["summary"])
+    for prop in board["properties"]:
+        shown = property_text(board, card, prop)
+        if shown:
+            out.append(f"{prop['name']}: {shown}")
+    for field in card["fields"]:
+        out += indented(field["label"], field["value"])
+    if card["tasks"]:
+        done = sum(1 for t in card["tasks"] if t["done"])
+        out.append(f"Tasks ({done} of {len(card['tasks'])} done):")
+        out += ["  " + line for line in task_lines(card)]
+    ticked = set(card["checks"])
+    for cl in board["checklists"]:
+        lines = [i for i in cl["items"] if not i["heading"]]
+        if lines:
+            out.append(f"{cl['name']} ({sum(1 for i in lines if i['id'] in ticked)} of {len(lines)}):")
+            out += [f"  {i['text']}" if i["heading"] else f"  [{'x' if i['id'] in ticked else ' '}] {i['text']}"
+                    for i in cl["items"]]
+    for section in card["sections"]:
+        out.append(f"{section['label']}:")
+        out += ["  " + line for line in section["body"].split("\n")]
+    if card["notes"]:
+        out.append("Notes:")
+        out += ["  " + line for line in card["notes"].split("\n")]
+    out.append(f"Created {card['created']}, updated {card['updated']}")
+    return out
+
+
+def cmd_show(args):
+    store = Store(args.data, starter=False)
+    board = store.get_board(find_board(store, args.board))
+    card = card_of(board, args.key)
+    if args.json:
+        write_json(card, None, False)
+        return
+    for line in card_lines(board, card):
+        print(line)
+
+
+def cmd_edit(args):
+    notes = read_text(args.notes_file) if args.notes_file is not None else args.notes
+    asked = (args.title, args.summary, args.group, args.column, args.blocked, notes)
+    if all(v is None for v in asked) and not (args.label or args.unlabel or args.set or args.clear):
+        args.parser.error("say what to change, with an option such as --title or --set")
+    pairs = [split_pair(pair, "--set", "PROPERTY=VALUE", args.parser) for pair in args.set]
+    store = Store(args.data, starter=False)
+
+    def build(board):
+        card = card_of(board, args.key)
+        changes = {key: value for key, value in (("title", args.title), ("summary", args.summary),
+                                                  ("blocked", args.blocked), ("notes", notes)) if value is not None}
+        if args.group is not None:
+            changes["group"] = find_named(board["groups"], args.group, board["groupLabel"].lower(), board) if args.group else None
+        if args.column is not None:
+            column = find_named(board["columns"], args.column, "column", board)
+            if column != card["column"]:  # to the bottom, as move does
+                changes.update(column=column, rank=max((c["rank"] for c in board["cards"]), default=0) + 1)
+        if args.label or args.unlabel:
+            labels = card["labels"] + [find_named(board["labels"], name, "label", board) for name in args.label]
+            gone = {find_named(board["labels"], name, "label", board) for name in args.unlabel}
+            changes["labels"] = [lid for lid in labels if lid not in gone]
+        if pairs or args.clear:
+            values = {}
+            for name, value in pairs:
+                prop = property_named(board, name)
+                values[prop["id"]] = TYPES[prop["type"]].parse_text(value, prop)
+            for name in args.clear:
+                values[property_named(board, name)["id"]] = None
+            changes["properties"] = values
+        store.update_card(board["id"], args.key, changes, rev=board["rev"])
+
+    changing(store, find_board(store, args.board), build)
+    print(f"Changed {args.key}.")
+
+
+def cmd_delete(args):
+    if not args.yes:
+        args.parser.error(f"deleting {args.key} can't be undone except by restoring a backup; add --yes to delete it")
+    store = Store(args.data, starter=False)
+    board = store.get_board(find_board(store, args.board))
+    title = card_of(board, args.key)["title"]
+    store.delete_card(board["id"], args.key)
+    print(f"Deleted {args.key} ({title}).")
+
+
+def cmd_task(args):
+    store = Store(args.data, starter=False)
+    board_id = find_board(store, args.board)
+    if not (args.add or args.done or args.reopen or args.remove):
+        for line in task_lines(card_of(store.get_board(board_id), args.key)):
+            print(line)
+        return
+
+    def build(board):
+        tasks = [dict(t) for t in card_of(board, args.key)["tasks"]]
+        for n in args.done + args.reopen + args.remove:  # positions as the list stood before this command
+            if n > len(tasks):
+                raise StoreError(f"{args.key} has {count(len(tasks), 'task')}, so there's no task {n}.")
+        for n in args.done:
+            tasks[n - 1]["done"] = True
+        for n in args.reopen:
+            tasks[n - 1]["done"] = False
+        tasks = [t for n, t in enumerate(tasks, 1) if n not in args.remove] + [{"text": t} for t in args.add]
+        return store.update_card(board["id"], args.key, {"tasks": tasks}, rev=board["rev"])
+
+    for line in task_lines(card_of(changing(store, board_id, build), args.key)):
+        print(line)
+
+
+def cmd_transfer(args):
+    store = Store(args.data, starter=False)
+    source, target = find_board(store, args.board), find_board(store, args.target)
+    done = store.transfer_card(source, args.key, target, args.column)
+    card = card_of(done["target"], done["key"])
+    column = next(c["name"] for c in done["target"]["columns"] if c["id"] == card["column"])
+    print(f"Moved {args.key} to {done['target']['name']} as {done['key']}, in {column}.")
+    if done["dropped"]:
+        print("Not carried over: " + ", ".join(done["dropped"]) + ".")
+
+
+# ---- a board's structure -------------------------------------------------------------------------
+
+
+def split_pair(given, option, shape, parser):
+    """OLD=NEW or PROPERTY=VALUE, split at the first =."""
+    left, sep, right = given.partition("=")
+    if not sep or not left.strip():
+        parser.error(f"{option} takes {shape}, like {option} {shape.split('=')[0].capitalize()}=...")
+    return left.strip(), right
+
+
+def cmd_new(args):
+    store = Store(args.data, starter=False)  # the new board is the first thing in a new file
+    board = store.create_board(args.name, args.description or "")
+    print(f"Added {board['name']} as {board['id']}.")
+
+
+def cmd_labels(args):
+    if args.color and not args.add:
+        args.parser.error("--color goes with --add")
+    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename else None
+    store = Store(args.data, starter=False)
+    board_id = find_board(store, args.board)
+    said = []
+
+    def build(board):
+        said.clear()
+        labels = [dict(lab) for lab in board["labels"]]
+        if rename:
+            lid = find_named(board["labels"], rename[0], "label", board)
+            for lab in labels:
+                if lab["id"] == lid:
+                    said.append(f"Renamed {lab['name']} to {rename[1].strip()}.")
+                    lab["name"] = rename[1]
+        if args.remove:
+            lid = find_named(board["labels"], args.remove, "label", board)
+            used = sum(1 for c in board["cards"] if lid in c["labels"])
+            said.append(f"Removed {next(lab['name'] for lab in labels if lab['id'] == lid)}"
+                        + (f" from the board and from {count(used, 'card')}." if used else "."))
+            labels = [lab for lab in labels if lab["id"] != lid]
+        if args.add:
+            labels.append({"name": args.add, "color": args.color})
+            said.append(f"Added {args.add.strip()}.")
+        return store.update_board(board["id"], {"labels": labels}, rev=board["rev"])
+
+    if rename or args.remove or args.add:
+        board = changing(store, board_id, build)
+        print("\n".join(said))
+        return
+    board = store.get_board(board_id)
+    for lab in board["labels"]:
+        used = sum(1 for c in board["cards"] if lab["id"] in c["labels"])
+        print(f"{lab['name']:<24} {lab['color']:<7} {count(used, 'card')}")
+    if not board["labels"]:
+        print(f"{board['name']} has no labels yet. Add one with --add NAME.")
+
+
+PROPERTY_OPTIONS = ("choices", "min", "max", "decimals", "unit")
+
+
+def describe_property(prop):
+    """A definition as one line: its type, then each option it has."""
+    parts = [prop["type"]]
+    for key in PROPERTY_OPTIONS:
+        if key in prop and prop[key] not in (None, "") and not (key == "decimals" and prop[key] == 0):
+            value = prop[key]
+            parts.append(f"{key} " + (", ".join(c["name"] for c in value) if key == "choices" else str(value)))
+    return ", ".join(parts)
+
+
+def cmd_properties(args):
+    given = {key: getattr(args, key) for key in PROPERTY_OPTIONS if getattr(args, key) is not None}
+    if (args.type or given) and not args.add:
+        args.parser.error("--type, --choices, --min, --max, --decimals and --unit go with --add")
+    if args.add and not args.type:
+        args.parser.error("--add needs --type, one of " + ", ".join(TYPE_NAMES))
+    rename = split_pair(args.rename, "--rename", "OLD=NEW", args.parser) if args.rename else None
+    if "choices" in given:
+        given["choices"] = [c.strip() for c in given["choices"].split(",") if c.strip()]
+    if args.add:
+        made = TYPES[args.type].clean_definition({"name": args.add, "type": args.type, **given})  # checks the options
+        unused = [f"--{key}" for key in given if key not in made]
+        if unused:
+            args.parser.error(f"a {args.type} property doesn't take {' or '.join(unused)}")
+    store = Store(args.data, starter=False)
+    board_id = find_board(store, args.board)
+    said = []
+
+    def build(board):
+        said.clear()
+        props = [dict(p) for p in board["properties"]]
+        if rename:
+            pid = property_named(board, rename[0])["id"]
+            for prop in props:
+                if prop["id"] == pid:
+                    said.append(f"Renamed {prop['name']} to {rename[1].strip()}.")
+                    prop["name"] = rename[1]
+        if args.remove:
+            prop = property_named(board, args.remove)
+            used = sum(1 for c in board["cards"] if prop["id"] in c["properties"])
+            said.append(f"Removed {prop['name']}" + (f" from the board and cleared it on {count(used, 'card')}." if used else "."))
+            props = [p for p in props if p["id"] != prop["id"]]
+        if args.add:
+            props.append({"name": args.add, "type": args.type, **given})
+            said.append(f"Added {args.add.strip()}.")
+        return store.update_board(board["id"], {"properties": props}, rev=board["rev"])
+
+    if rename or args.remove or args.add:
+        changing(store, board_id, build)
+        print("\n".join(said))
+        return
+    board = store.get_board(board_id)
+    for prop in board["properties"]:
+        used = sum(1 for c in board["cards"] if prop["id"] in c["properties"])
+        print(f"{prop['name']:<24} {describe_property(prop)}  ({count(used, 'card')} with a value)")
+    if not board["properties"]:
+        print(f"{board['name']} has no properties yet. Add one with --add NAME --type TYPE.")
+
+
+def cmd_views(args):
+    if (args.query is not None or args.sort is not None) and not args.add:
+        args.parser.error("--query and --sort go with --add")
+    if args.add and args.query is None:
+        args.parser.error("--add needs --query (it can be \"\" for every card)")
+    store = Store(args.data, starter=False)
+    board_id = find_board(store, args.board)
+    said = []
+
+    def build(board):
+        said.clear()
+        views = [dict(v) for v in board["views"]]
+        changes = {}
+        if args.remove:
+            vid = find_named(board["views"], args.remove, "saved view", board)
+            said.append(f"Removed {next(v['name'] for v in views if v['id'] == vid)}.")
+            views = [v for v in views if v["id"] != vid]
+        if args.add:
+            views.append({"name": args.add, "query": args.query, "sort": args.sort or ""})
+            said.append(f"Added {args.add.strip()}.")
+        if args.remove or args.add:
+            changes["views"] = views
+        if args.default is not None:
+            changes["settings"] = {"defaultView": None if args.default.strip().lower() == "none" else args.default}
+        updated = store.update_board(board["id"], changes, rev=board["rev"])
+        if args.default is not None:
+            default = next((v["name"] for v in updated["views"] if v["id"] == updated["settings"]["defaultView"]), None)
+            said.append(f"The board opens with {default}." if default else "The board opens with no view.")
+        return updated
+
+    if args.remove or args.add or args.default is not None:
+        changing(store, board_id, build)
+        print("\n".join(said))
+        return
+    board = store.get_board(board_id)
+    default = board["settings"]["defaultView"]
+    for view in board["views"]:
+        sort = f"  sorted by {view['sort']}" if view["sort"] else ""
+        mark = "  (opens by default)" if view["id"] == default else ""
+        print(f"{view['name']:<24} {view['query'] or '(every card)'}{sort}{mark}")
+    if not board["views"]:
+        print(f"{board['name']} has no saved views yet. Add one with --add NAME --query Q.")
+
+
+LIMIT_POLICY_WORDS = {"warn": "warn (a column over its limit is flagged)", "refuse": "refuse (a full column takes no more cards)"}
+
+
+def cmd_settings(args):
+    store = Store(args.data, starter=False)
+    board_id = find_board(store, args.board)
+    changes = {key: value for key, value in (("name", args.name), ("description", args.description), ("prefix", args.prefix))
+               if value is not None}
+    settings = {}
+    if args.limit_policy:
+        settings["limitPolicy"] = args.limit_policy
+    if args.card_face is not None:
+        settings["cardFace"] = [part.strip() for part in args.card_face.split(",") if part.strip()]
+    if settings:
+        changes["settings"] = settings
+    board = store.update_board(board_id, changes) if changes else store.get_board(board_id)
+    names = {p["id"]: p["name"] for p in board["properties"]}
+    views = {v["id"]: v["name"] for v in board["views"]}
+    face = ", ".join(names.get(part, part) for part in board["settings"]["cardFace"]) or "(only the title)"
+    print(f"Name: {board['name']}")
+    if board["description"]:
+        print(*indented("Description", board["description"]), sep="\n")
+    print(f"Key prefix: {board['prefix']}")
+    print(f"Limit policy: {LIMIT_POLICY_WORDS[board['settings']['limitPolicy']]}")
+    print(f"Card face: {face}")
+    print(f"Default view: {views.get(board['settings']['defaultView'], 'none')}")
 
 
 def cmd_import(args):
@@ -300,7 +685,7 @@ def build_parser():
 
     def command(name, func, help_text):
         p = sub.add_parser(name, parents=[common], help=help_text, description=help_text + ".")
-        p.set_defaults(func=func)
+        p.set_defaults(func=func, parser=p)
         return p
 
     run_options(sub.add_parser("serve", parents=[common], help="run the board (the default)", description="Run the board."))
@@ -324,6 +709,78 @@ def build_parser():
     p.add_argument("board", help="board id or name")
     p.add_argument("key", help="card key, like T-12")
     p.add_argument("--restore", action="store_true", help="bring the card back")
+    p = command("show", cmd_show, "show everything on one card")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("key", help="card key, like T-12")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p = command("edit", cmd_edit, "change a card")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("key", help="card key, like T-12")
+    p.add_argument("--title", help="a new title")
+    p.add_argument("--summary", help="a new summary (\"\" clears it)")
+    p.add_argument("--group", help="group id or name (\"\" takes the card out of its group)")
+    p.add_argument("--column", help="column id or name; the card goes to the bottom of it")
+    p.add_argument("--label", metavar="NAME", action="append", default=[], help="add a label (repeat for more)")
+    p.add_argument("--unlabel", metavar="NAME", action="append", default=[], help="take a label off (repeat for more)")
+    p.add_argument("--set", metavar="PROPERTY=VALUE", action="append", default=[],
+                   help="set a property, written as you would type it: Points=3, Priority=high, Reviewed=yes")
+    p.add_argument("--clear", metavar="PROPERTY", action="append", default=[], help="clear a property")
+    p.add_argument("--blocked", metavar="TEXT", help="what the card is waiting on (\"\" means it isn't blocked)")
+    notes = p.add_mutually_exclusive_group()
+    notes.add_argument("--notes", metavar="TEXT", help="replace the notes")
+    notes.add_argument("--notes-file", metavar="FILE", help="replace the notes with a text file, or - for standard input")
+    p = command("delete", cmd_delete, "delete a card for good")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("key", help="card key, like T-12")
+    p.add_argument("--yes", action="store_true", help="really delete it (there's no undo but restoring a backup)")
+    p = command("task", cmd_task, "list a card's tasks, or add, tick, untick and remove them")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("key", help="card key, like T-12")
+    p.add_argument("--add", metavar="TEXT", action="append", default=[], help="add a task at the end (repeat for more)")
+    p.add_argument("--done", metavar="N", type=task_number, action="append", default=[], help="tick task N, counting from 1")
+    p.add_argument("--reopen", metavar="N", type=task_number, action="append", default=[], help="untick task N")
+    p.add_argument("--remove", metavar="N", type=task_number, action="append", default=[], help="remove task N")
+    p = command("transfer", cmd_transfer, "move a card to another board")
+    p.add_argument("board", help="board id or name the card is on")
+    p.add_argument("key", help="card key, like T-12")
+    p.add_argument("target", metavar="target_board", help="board id or name to move it to")
+    p.add_argument("--column", help="column on the other board (default: one with the same name, or else the first)")
+    p = command("new", cmd_new, "make a new board")
+    p.add_argument("name", help="the board's name")
+    p.add_argument("--description", help="a line about what the board is for")
+    p = command("labels", cmd_labels, "list a board's labels, or add, rename and remove them")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("--add", metavar="NAME", help="add a label")
+    p.add_argument("--color", choices=COLORS, help="the new label's color (default: the next in turn)")
+    p.add_argument("--rename", metavar="OLD=NEW", help="rename a label; cards keep it")
+    p.add_argument("--remove", metavar="NAME", help="remove a label from the board and from every card")
+    p = command("properties", cmd_properties, "list a board's properties, or add, rename and remove them")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("--add", metavar="NAME", help="add a property")
+    p.add_argument("--type", choices=TYPE_NAMES, help="what kind of value the new property holds")
+    p.add_argument("--choices", metavar="A,B,C", help="for choice and multi: the choices, separated by commas")
+    p.add_argument("--min", type=number, metavar="N", help="for number: the smallest value")
+    p.add_argument("--max", type=number, metavar="N", help="for number: the largest value; for rating: how high it goes (3 to 10)")
+    p.add_argument("--decimals", type=int, metavar="N", help="for number: decimal places kept, 0 to 4")
+    p.add_argument("--unit", metavar="U", help="for number: a unit shown after the value, like h or kg")
+    p.add_argument("--rename", metavar="OLD=NEW", help="rename a property; cards keep their values")
+    p.add_argument("--remove", metavar="NAME", help="remove a property and every card's value for it")
+    p = command("views", cmd_views, "list a board's saved views, or add and remove them")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("--add", metavar="NAME", help="save a view")
+    p.add_argument("--query", metavar="Q", help="the new view's search, as you would type it in the search box")
+    p.add_argument("--sort", metavar="S", help="the new view's sort, like title; one that starts with - is written --sort=-points")
+    p.add_argument("--remove", metavar="NAME", help="remove a saved view")
+    p.add_argument("--default", metavar="NAME", help="the view the board opens with, or none")
+    p = command("settings", cmd_settings, "show a board's settings, or change them")
+    p.add_argument("board", help="board id or name")
+    p.add_argument("--name", help="rename the board")
+    p.add_argument("--description", help="a new description (\"\" clears it)")
+    p.add_argument("--prefix", help="key prefix for new cards with no group, like T or REL")
+    p.add_argument("--limit-policy", choices=LIMIT_POLICIES,
+                   help="warn: flag a column over its limit; refuse: a full column takes no more cards")
+    p.add_argument("--card-face", metavar="A,B,C",
+                   help="what cards show, in order: " + ", ".join(CARD_FACE_PARTS) + " and property names (\"\" for only the title)")
     p = command("import", cmd_import, "add boards from a JSON file (one exported board, or a whole boards file)")
     p.add_argument("file", help="the file, or - for standard input")
     p = command("export", cmd_export, "write a board as JSON")
@@ -348,6 +805,30 @@ def port_number(value):
     if not 0 <= port <= 65535:
         raise argparse.ArgumentTypeError(f"{value} isn't a port number (they go from 1 to 65535)")
     return port
+
+
+def task_number(value):
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a task number (tasks are numbered from 1, as the task command lists them)")
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"{value} isn't a task number (tasks are numbered from 1)")
+    return n
+
+
+def number(value):
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        made = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a number")
+    if made != made or made in (float("inf"), float("-inf")):
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a number")
+    return made
 
 
 class Parser(argparse.ArgumentParser):

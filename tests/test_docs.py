@@ -90,6 +90,11 @@ class ExamplesRun(unittest.TestCase):
             shown = blocks("docs/examples.md", ("text",))
             self.assertEqual(found["laneboard sample"].strip(), shown[1])
             self.assertEqual(found['laneboard cards "Software release"'].strip(), shown[2])
+            self.assertEqual(found['laneboard properties "Software release"'].strip(), shown[4])
+            self.assertEqual(found['laneboard task "Software release" REL-3 --done 1'].strip(), shown[5])
+            card = found['laneboard show "Software release" REL-3'].strip().splitlines()
+            self.assertEqual(card[:len(shown[6].splitlines())], shown[6].splitlines())
+            self.assertEqual(found['laneboard transfer "Software release" REL-3 "Next release" --column Ready'].strip(), shown[7])
 
     def test_readme_commands_that_do_not_start_a_server(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,6 +111,16 @@ class ExamplesRun(unittest.TestCase):
             with open(os.path.join(tmp, "moving.json"), "w", encoding="utf-8") as f:
                 f.write(blocks("docs/file-format.md", ("json",))[1])
             self.assertIn("Moving house", self.run_line("laneboard import moving.json", tmp, env))
+
+    def test_the_full_import_in_the_format_doc_imports_as_described(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "LANEBOARD_DATA": os.path.join(tmp, "try.json"), "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
+            with open(os.path.join(tmp, "garden.json"), "w", encoding="utf-8") as f:
+                f.write(blocks("docs/file-format.md", ("json",))[2])
+            self.assertIn("Garden", self.run_line("laneboard import garden.json", tmp, env))
+            shown = self.run_line("laneboard show Garden G-1", tmp, env)
+            for line in ("Labels: Outside, Seeds", "Hours: 1.5 h", "Season: Spring", "  1. [ ] Soak the seeds", "  2. [x] Dig the bed"):
+                self.assertIn(line, shown.splitlines())
 
 
 @unittest.skipUnless(shutil.which("git"), "git is not installed")
