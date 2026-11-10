@@ -1,0 +1,199 @@
+{
+ "id": "content",
+ "name": "Content pipeline",
+ "description": "Posts, newsletters and videos from first idea to published, with channels and word counts.",
+ "board": {
+  "prefix": "POST",
+  "groupLabel": "Series",
+  "columns": [
+   {
+    "name": "Ideas",
+    "limit": null
+   },
+   {
+    "name": "Drafting",
+    "limit": 3
+   },
+   {
+    "name": "Editing",
+    "limit": 2
+   },
+   {
+    "name": "Ready",
+    "limit": null
+   },
+   {
+    "name": "Published",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Evergreen",
+    "color": "green"
+   },
+   {
+    "name": "Timely",
+    "color": "amber"
+   },
+   {
+    "name": "Guest",
+    "color": "violet"
+   }
+  ],
+  "properties": [
+   {
+    "name": "Channel",
+    "type": "multi",
+    "choices": [
+     {
+      "name": "Blog",
+      "color": "blue"
+     },
+     {
+      "name": "Newsletter",
+      "color": "teal"
+     },
+     {
+      "name": "Video",
+      "color": "rose"
+     },
+     {
+      "name": "Social",
+      "color": "violet"
+     }
+    ]
+   },
+   {
+    "name": "Word count",
+    "type": "number",
+    "min": 0,
+    "decimals": 0,
+    "unit": "words"
+   }
+  ],
+  "views": [
+   {
+    "name": "Newsletter pieces",
+    "query": "channel:newsletter -column:published",
+    "sort": ""
+   },
+   {
+    "name": "Long reads",
+    "query": "word-count:>=1500",
+    "sort": "-word-count"
+   },
+   {
+    "name": "Timely",
+    "query": "label:timely -column:published",
+    "sort": ""
+   }
+  ],
+  "settings": {
+   "cardFace": [
+    "labels",
+    "Channel",
+    "Word count",
+    "progress"
+   ],
+   "limitPolicy": "warn",
+   "defaultView": null
+  },
+  "template": [
+   "Outline",
+   "Sources"
+  ],
+  "checklists": [
+   {
+    "id": "before-publishing",
+    "name": "Before publishing",
+    "items": [
+     {
+      "id": "i-spell",
+      "text": "Spelling and grammar checked",
+      "heading": false
+     },
+     {
+      "id": "i-links",
+      "text": "Every link works",
+      "heading": false
+     },
+     {
+      "id": "i-image",
+      "text": "Image and alt text added",
+      "heading": false
+     }
+    ]
+   }
+  ]
+ },
+ "cards": [
+  {
+   "title": "Ten small habits for a tidy desk",
+   "column": "Ideas",
+   "labels": [
+    "Evergreen"
+   ],
+   "properties": {
+    "Channel": "Blog, Social"
+   }
+  },
+  {
+   "title": "What changed this month",
+   "column": "Drafting",
+   "labels": [
+    "Timely"
+   ],
+   "properties": {
+    "Channel": "Newsletter",
+    "Word count": "800"
+   },
+   "sections": [
+    {
+     "label": "Outline",
+     "body": "Three headline changes\nOne reader question\nWhat is next"
+    }
+   ],
+   "tasks": [
+    {
+     "text": "Write the intro",
+     "done": true
+    },
+    {
+     "text": "Pick the reader question",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Walkthrough video: first week",
+   "column": "Editing",
+   "properties": {
+    "Channel": "Video",
+    "Word count": "1200"
+   }
+  },
+  {
+   "title": "Guest post on planning",
+   "column": "Ready",
+   "labels": [
+    "Guest"
+   ],
+   "properties": {
+    "Channel": "Blog",
+    "Word count": "1800"
+   }
+  },
+  {
+   "title": "Welcome post",
+   "column": "Published",
+   "labels": [
+    "Evergreen"
+   ],
+   "properties": {
+    "Channel": "Blog, Newsletter",
+    "Word count": "600"
+   }
+  }
+ ]
+}

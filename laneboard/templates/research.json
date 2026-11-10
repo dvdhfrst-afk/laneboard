@@ -1,0 +1,166 @@
+{
+ "id": "research",
+ "name": "Research notes",
+ "description": "Questions, reading and notes through to a written summary, with a source link and a confidence rating.",
+ "board": {
+  "prefix": "R",
+  "groupLabel": "Topic",
+  "columns": [
+   {
+    "name": "Questions",
+    "limit": null
+   },
+   {
+    "name": "Reading",
+    "limit": 4
+   },
+   {
+    "name": "Notes",
+    "limit": null
+   },
+   {
+    "name": "Written up",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Primary source",
+    "color": "green"
+   },
+   {
+    "name": "Secondary source",
+    "color": "blue"
+   },
+   {
+    "name": "Dataset",
+    "color": "teal"
+   },
+   {
+    "name": "Disputed",
+    "color": "rose"
+   }
+  ],
+  "properties": [
+   {
+    "name": "Source",
+    "type": "url"
+   },
+   {
+    "name": "Confidence",
+    "type": "rating",
+    "max": 5
+   }
+  ],
+  "views": [
+   {
+    "name": "Shaky findings",
+    "query": "confidence:<=2",
+    "sort": "confidence"
+   },
+   {
+    "name": "Has a source",
+    "query": "has:source",
+    "sort": "title"
+   },
+   {
+    "name": "Disputed",
+    "query": "label:disputed",
+    "sort": ""
+   }
+  ],
+  "settings": {
+   "cardFace": [
+    "labels",
+    "Confidence",
+    "Source",
+    "progress"
+   ],
+   "limitPolicy": "warn",
+   "defaultView": null
+  },
+  "template": [
+   "Claim",
+   "Evidence",
+   "What I still doubt"
+  ],
+  "checklists": [
+   {
+    "id": "before-writing-up",
+    "name": "Before writing up",
+    "items": [
+     {
+      "id": "i-source",
+      "text": "The source is linked",
+      "heading": false
+     },
+     {
+      "id": "i-second",
+      "text": "A second source agrees",
+      "heading": false
+     }
+    ]
+   }
+  ]
+ },
+ "cards": [
+  {
+   "title": "How much does shade change tomato yield?",
+   "column": "Questions",
+   "summary": "Start with garden trials, not opinion pieces."
+  },
+  {
+   "title": "Extension office trial results",
+   "column": "Reading",
+   "labels": [
+    "Primary source"
+   ],
+   "properties": {
+    "Source": "https://example.com/trial-results",
+    "Confidence": "4/5"
+   },
+   "tasks": [
+    {
+     "text": "Read the method section",
+     "done": true
+    },
+    {
+     "text": "Copy the yield table",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Forum thread on shade cloth",
+   "column": "Notes",
+   "labels": [
+    "Secondary source",
+    "Disputed"
+   ],
+   "properties": {
+    "Source": "https://example.com/forum/shade-cloth",
+    "Confidence": "2/5"
+   },
+   "sections": [
+    {
+     "label": "Claim",
+     "body": "Shade cloth raises yield in hot summers."
+    },
+    {
+     "label": "What I still doubt",
+     "body": "Nobody reports the plant variety."
+    }
+   ]
+  },
+  {
+   "title": "Summary: shade and yield",
+   "column": "Written up",
+   "labels": [
+    "Dataset"
+   ],
+   "properties": {
+    "Confidence": "3/5"
+   }
+  }
+ ]
+}

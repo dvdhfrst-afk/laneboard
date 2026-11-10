@@ -1,0 +1,118 @@
+{
+ "id": "basic",
+ "name": "Basic",
+ "description": "Five plain columns from Backlog to Done, with a limit of one card in progress.",
+ "board": {
+  "prefix": "T",
+  "groupLabel": "Group",
+  "columns": [
+   {
+    "name": "Backlog",
+    "limit": null
+   },
+   {
+    "name": "Ready",
+    "limit": null
+   },
+   {
+    "name": "In progress",
+    "limit": 1
+   },
+   {
+    "name": "Review",
+    "limit": null
+   },
+   {
+    "name": "Done",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Urgent",
+    "color": "rose"
+   },
+   {
+    "name": "Later",
+    "color": "slate"
+   }
+  ],
+  "views": [
+   {
+    "name": "In flight",
+    "query": "column:\"In progress\" OR column:Review",
+    "sort": ""
+   },
+   {
+    "name": "Urgent",
+    "query": "label:urgent",
+    "sort": "title"
+   }
+  ],
+  "template": [
+   "Steps",
+   "Done when"
+  ],
+  "checklists": [
+   {
+    "id": "before-done",
+    "name": "Before it is done",
+    "items": [
+     {
+      "id": "i-works",
+      "text": "It works the way the card says",
+      "heading": false
+     },
+     {
+      "id": "i-clean",
+      "text": "Anything left over is cleaned up",
+      "heading": false
+     }
+    ]
+   }
+  ]
+ },
+ "cards": [
+  {
+   "title": "Read the quick tour",
+   "column": "Done",
+   "summary": "Cards move between columns by dragging."
+  },
+  {
+   "title": "Move this card into In progress",
+   "column": "Ready",
+   "summary": "The column holds one card at a time, so finish or move the other first.",
+   "tasks": [
+    {
+     "text": "Drag it across",
+     "done": false
+    },
+    {
+     "text": "Add a note to it",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Write your first real card",
+   "column": "Backlog",
+   "labels": [
+    "Later"
+   ],
+   "sections": [
+    {
+     "label": "Steps",
+     "body": "Press the add button\nGive it a short title"
+    }
+   ]
+  },
+  {
+   "title": "Waiting on a reply",
+   "column": "Backlog",
+   "labels": [
+    "Urgent"
+   ],
+   "blocked": "Waiting for an answer from the supplier."
+  }
+ ]
+}

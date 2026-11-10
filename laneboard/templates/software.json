@@ -1,0 +1,228 @@
+{
+ "id": "software",
+ "name": "Software team",
+ "description": "A product board with bugs, features and chores, story points, a priority and a component.",
+ "board": {
+  "prefix": "APP",
+  "groupLabel": "Area",
+  "columns": [
+   {
+    "name": "Backlog",
+    "limit": null
+   },
+   {
+    "name": "Ready",
+    "limit": null
+   },
+   {
+    "name": "In progress",
+    "limit": 3
+   },
+   {
+    "name": "Review",
+    "limit": 3
+   },
+   {
+    "name": "Done",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Bug",
+    "color": "rose"
+   },
+   {
+    "name": "Feature",
+    "color": "blue"
+   },
+   {
+    "name": "Chore",
+    "color": "slate"
+   }
+  ],
+  "properties": [
+   {
+    "name": "Points",
+    "type": "number",
+    "min": 0,
+    "max": 100,
+    "decimals": 0,
+    "unit": "pts"
+   },
+   {
+    "name": "Priority",
+    "type": "choice",
+    "choices": [
+     {
+      "name": "Low",
+      "color": "slate"
+     },
+     {
+      "name": "Medium",
+      "color": "blue"
+     },
+     {
+      "name": "High",
+      "color": "amber"
+     },
+     {
+      "name": "Urgent",
+      "color": "rose"
+     }
+    ]
+   },
+   {
+    "name": "Component",
+    "type": "choice",
+    "choices": [
+     {
+      "name": "Web app",
+      "color": "teal"
+     },
+     {
+      "name": "API",
+      "color": "violet"
+     },
+     {
+      "name": "Docs",
+      "color": "green"
+     }
+    ]
+   }
+  ],
+  "views": [
+   {
+    "name": "Open bugs",
+    "query": "label:bug -column:done",
+    "sort": "-priority"
+   },
+   {
+    "name": "Urgent",
+    "query": "priority:urgent -column:done",
+    "sort": ""
+   },
+   {
+    "name": "Big items",
+    "query": "points:>=8 -column:done",
+    "sort": "-points"
+   }
+  ],
+  "settings": {
+   "cardFace": [
+    "labels",
+    "Priority",
+    "Points",
+    "progress",
+    "blocked"
+   ],
+   "limitPolicy": "warn",
+   "defaultView": null
+  },
+  "template": [
+   "What and why",
+   "Done when"
+  ],
+  "checklists": [
+   {
+    "id": "definition-of-done",
+    "name": "Definition of done",
+    "items": [
+     {
+      "id": "i-tests",
+      "text": "Tests cover the change",
+      "heading": false
+     },
+     {
+      "id": "i-review",
+      "text": "Someone else has reviewed it",
+      "heading": false
+     },
+     {
+      "id": "i-docs",
+      "text": "Docs are updated",
+      "heading": false
+     }
+    ]
+   }
+  ]
+ },
+ "cards": [
+  {
+   "title": "Search box ignores accents",
+   "column": "Backlog",
+   "labels": [
+    "Bug"
+   ],
+   "summary": "Searching for cafe should also find the spelling with an accent.",
+   "properties": {
+    "Points": "2",
+    "Priority": "Medium",
+    "Component": "Web app"
+   }
+  },
+  {
+   "title": "Export a board as a printable page",
+   "column": "Ready",
+   "labels": [
+    "Feature"
+   ],
+   "properties": {
+    "Points": "5",
+    "Priority": "High",
+    "Component": "API"
+   },
+   "tasks": [
+    {
+     "text": "Decide what the page shows",
+     "done": true
+    },
+    {
+     "text": "Write the export",
+     "done": false
+    },
+    {
+     "text": "Add a test",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Crash when a title is empty",
+   "column": "In progress",
+   "labels": [
+    "Bug"
+   ],
+   "summary": "The form closes without saying why.",
+   "properties": {
+    "Points": "3",
+    "Priority": "Urgent",
+    "Component": "Web app"
+   }
+  },
+  {
+   "title": "Upgrade the test tools",
+   "column": "Review",
+   "labels": [
+    "Chore"
+   ],
+   "properties": {
+    "Points": "1",
+    "Priority": "Low",
+    "Component": "API"
+   }
+  },
+  {
+   "title": "Write the getting started guide",
+   "column": "Done",
+   "labels": [
+    "Chore"
+   ],
+   "properties": {
+    "Points": "3",
+    "Priority": "Medium",
+    "Component": "Docs"
+   }
+  }
+ ]
+}

@@ -1,0 +1,210 @@
+{
+ "id": "support",
+ "name": "Customer support",
+ "description": "Requests from new to resolved, with a severity and a customer tier. Triaged holds five at a time and refuses a sixth.",
+ "board": {
+  "prefix": "SUP",
+  "groupLabel": "Product",
+  "columns": [
+   {
+    "name": "New",
+    "limit": null
+   },
+   {
+    "name": "Triaged",
+    "limit": 5
+   },
+   {
+    "name": "Waiting on customer",
+    "limit": null
+   },
+   {
+    "name": "Resolved",
+    "limit": null
+   }
+  ],
+  "labels": [
+   {
+    "name": "Question",
+    "color": "blue"
+   },
+   {
+    "name": "Bug report",
+    "color": "rose"
+   },
+   {
+    "name": "Feature request",
+    "color": "violet"
+   },
+   {
+    "name": "Billing",
+    "color": "amber"
+   }
+  ],
+  "properties": [
+   {
+    "name": "Severity",
+    "type": "choice",
+    "choices": [
+     {
+      "name": "Low",
+      "color": "slate"
+     },
+     {
+      "name": "Medium",
+      "color": "blue"
+     },
+     {
+      "name": "High",
+      "color": "amber"
+     },
+     {
+      "name": "Critical",
+      "color": "rose"
+     }
+    ]
+   },
+   {
+    "name": "Customer tier",
+    "type": "choice",
+    "choices": [
+     {
+      "name": "Free",
+      "color": "slate"
+     },
+     {
+      "name": "Standard",
+      "color": "teal"
+     },
+     {
+      "name": "Premium",
+      "color": "violet"
+     }
+    ]
+   }
+  ],
+  "views": [
+   {
+    "name": "Critical and open",
+    "query": "severity:critical -column:resolved",
+    "sort": ""
+   },
+   {
+    "name": "Premium customers",
+    "query": "customer-tier:premium -column:resolved",
+    "sort": "-severity"
+   },
+   {
+    "name": "Waiting on customer",
+    "query": "column:\"Waiting on customer\"",
+    "sort": "updated"
+   }
+  ],
+  "settings": {
+   "cardFace": [
+    "labels",
+    "Severity",
+    "Customer tier",
+    "blocked"
+   ],
+   "limitPolicy": "refuse",
+   "defaultView": null
+  },
+  "template": [
+   "What happened",
+   "What we told them"
+  ],
+  "checklists": [
+   {
+    "id": "before-closing",
+    "name": "Before closing",
+    "items": [
+     {
+      "id": "i-answered",
+      "text": "The question was answered",
+      "heading": false
+     },
+     {
+      "id": "i-confirmed",
+      "text": "The customer confirmed it works",
+      "heading": false
+     }
+    ]
+   }
+  ]
+ },
+ "cards": [
+  {
+   "title": "Cannot reset my password",
+   "column": "New",
+   "labels": [
+    "Question"
+   ],
+   "properties": {
+    "Severity": "Medium",
+    "Customer tier": "Standard"
+   },
+   "sections": [
+    {
+     "label": "What happened",
+     "body": "The reset email never arrives."
+    }
+   ]
+  },
+  {
+   "title": "Invoice shows the wrong amount",
+   "column": "Triaged",
+   "labels": [
+    "Billing"
+   ],
+   "properties": {
+    "Severity": "High",
+    "Customer tier": "Premium"
+   }
+  },
+  {
+   "title": "Export button does nothing",
+   "column": "Triaged",
+   "labels": [
+    "Bug report"
+   ],
+   "properties": {
+    "Severity": "Critical",
+    "Customer tier": "Standard"
+   },
+   "tasks": [
+    {
+     "text": "Reproduce it",
+     "done": true
+    },
+    {
+     "text": "Send a workaround",
+     "done": false
+    }
+   ]
+  },
+  {
+   "title": "Can the report include a chart?",
+   "column": "Waiting on customer",
+   "labels": [
+    "Feature request"
+   ],
+   "properties": {
+    "Severity": "Low",
+    "Customer tier": "Free"
+   },
+   "blocked": "Asked which report they mean."
+  },
+  {
+   "title": "Where do I find my receipts?",
+   "column": "Resolved",
+   "labels": [
+    "Question"
+   ],
+   "properties": {
+    "Severity": "Low",
+    "Customer tier": "Free"
+   }
+  }
+ ]
+}
