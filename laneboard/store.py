@@ -1455,6 +1455,14 @@ class Store:
         """A value from another board's property, made to fit `prop`: by its text first (choices by name), then
         as it was stored (a number into a property with another unit). None if neither fits."""
         kind = TYPES[prop["type"]]
+        if "choices" in prop:  # by name only: an id here can be a renamed choice's, so it says nothing about the name
+            try:
+                fitted = kind.parse_text(shown, prop)
+            except StoreError:
+                return None
+            got = None if fitted is None else kind.format_text(fitted, prop)
+            same = got is not None and {n.strip().casefold() for n in got.split(",")} == {n.strip().casefold() for n in shown.split(",")}
+            return fitted if same else None
         for attempt in (lambda: kind.parse_text(shown, prop), lambda: kind.clean_value(value, prop)):
             try:
                 fitted = attempt()

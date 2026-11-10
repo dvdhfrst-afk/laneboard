@@ -105,6 +105,20 @@ class TransferTest(Case):
         self.assertIn("Points: 9", result["dropped"])
         self.assertIn("Priority: Low", result["dropped"])
 
+    def test_a_choice_carries_by_name_and_never_by_an_id_another_choice_kept(self):
+        # Both boards made "High" with the id high; on the target it has since been renamed Urgent.
+        for board in (self.source, self.target):
+            self.store.update_board(board, {"properties": [{"name": "Level", "type": "choice", "choices": ["Low", "High"]},
+                                                           {"name": "Areas", "type": "multi", "choices": ["Web", "iOS"]}]})
+        props = self.board(self.target)["properties"]
+        self.store.update_board(self.target, {"properties": [
+            dict(props[0], choices=[dict(c, name="Urgent") if c["id"] == "high" else c for c in props[0]["choices"]]),
+            dict(props[1], choices=[dict(c, name="iPhone") if c["id"] == "ios" else c for c in props[1]["choices"]])]})
+        self.store.update_card(self.source, self.key, {"properties": {"level": "high", "areas": ["ios"]}})
+        result = self.move()
+        self.assertEqual(result["target"]["cards"][-1]["properties"], {})
+        self.assertEqual([d for d in result["dropped"] if d.startswith(("Level", "Areas"))], ["Level: High", "Areas: iOS"])
+
     def test_the_column_is_named_or_matched_by_name_or_the_first(self):
         result = self.move()
         self.assertEqual(result["target"]["cards"][-1]["column"], "in-progress", "the column with the same name")
