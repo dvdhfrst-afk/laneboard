@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+from .properties import TYPES
+
 
 def tickable_ids(board):
     """Ids of the checklist lines a card can tick (headings can't be ticked)."""
@@ -60,6 +62,33 @@ def _options(prop, values):
 
 _SUMMARIES = {"text": _count_only, "url": _count_only, "checkbox": _count_only, "number": _number,
               "rating": _rating, "choice": _options, "multi": _options}
+
+
+def number_text(value, prop):
+    """A number property's total, average or sum as it shows on a card, with its unit."""
+    return TYPES["number"].format_text(value, prop)
+
+
+def _cards(n):
+    return f"{n} card{'' if n == 1 else 's'}"
+
+
+def property_summary(entry, prop, active):
+    """One property's line of the summary in words, like "Total 12 h, average 3 h, from 1 h to 5 h, on 4 cards".
+    `entry` is the property's entry in `summarize`, `prop` its definition, `active` the board's card count."""
+    if "total" in entry:
+        if not entry["cards"]:
+            return "No values yet"
+        return (f"Total {number_text(entry['total'], prop)}, average {number_text(entry['average'], prop)}, from "
+                f"{number_text(entry['min'], prop)} to {number_text(entry['max'], prop)}, on {_cards(entry['cards'])}")
+    if "outOf" in entry:
+        if not entry["cards"]:
+            return "No ratings yet"
+        return f"Average {entry['average']:g} out of {entry['outOf']}, on {_cards(entry['cards'])}"
+    if "options" in entry:
+        return ", ".join(f"{option['name']} {option['cards']}" for option in entry["options"])
+    verb = "Ticked" if entry["type"] == "checkbox" else "Set"
+    return f"{verb} on {entry['cards']} of {_cards(active)}"
 
 
 def summarize(board):

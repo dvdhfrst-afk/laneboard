@@ -68,9 +68,10 @@ import json
 import re
 
 from ..properties import TYPES, clean_definitions, find_property
-from ..schema import KEY_RE, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TEXT, StoreError
-from .common import (MAX_COLUMN_NAME, MAX_TASK_TEXT, MAX_TASKS, Fitter, Format, ImportResult, Lookups,
-                     archived_cards, columns_with_cards, decode, plural, read_json)
+from ..schema import (KEY_RE, MAX_COLUMN_NAME, MAX_COLUMNS, MAX_NAME, MAX_SUMMARY, MAX_TASK_TEXT, MAX_TASKS, MAX_TEXT,
+                      StoreError)
+from .common import (Fitter, Format, ImportResult, Lookups, archived_cards, columns_with_cards, decode, plural,
+                     read_json)
 
 # What the Board settings part holds: the board's structure, as stored, apart from its name,
 # description and cards (which the rest of the file holds).
