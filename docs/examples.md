@@ -67,6 +67,103 @@ laneboard archive "Software release" REL-3 --restore
 
 An open page shows each of these within a few seconds.
 
+## Labels, properties and tasks
+
+A board can have labels, and properties that each card fills in, like points or a priority:
+
+```bash
+laneboard labels "Software release" --add Docs --color amber
+```
+
+```bash
+laneboard properties "Software release" --add Points --type number --min 0
+```
+
+```bash
+laneboard properties "Software release" --add Priority --type choice --choices "Low, Medium, High"
+```
+
+```bash
+laneboard properties "Software release"
+```
+
+```text
+Points                   number, min 0  (0 cards with a value)
+Priority                 choice, choices Low, Medium, High  (0 cards with a value)
+```
+
+Give a card a label and its values, written the way you would say them:
+
+```bash
+laneboard edit "Software release" REL-3 --label Docs --set Points=3 --set Priority=high
+```
+
+A card can also keep its own short to-do list. Tasks are numbered from 1:
+
+```bash
+laneboard task "Software release" REL-3 --add "List what changed" --add "Ask for a review"
+```
+
+```bash
+laneboard task "Software release" REL-3 --done 1
+```
+
+```text
+1. [x] List what changed
+2. [ ] Ask for a review
+```
+
+`show` prints everything on the card, then its checklist, sections and notes:
+
+```bash
+laneboard show "Software release" REL-3
+```
+
+```text
+REL-3  Write the upgrade notes
+Column: Doing
+Labels: Docs
+Summary: What changes for people upgrading.
+Points: 3
+Priority: High
+Tasks (1 of 2 done):
+  1. [x] List what changed
+  2. [ ] Ask for a review
+```
+
+Save a search as a view, and choose what the cards show on the board:
+
+```bash
+laneboard views "Software release" --add "Docs work" --query "label:docs" --sort=-points
+```
+
+```bash
+laneboard settings "Software release" --card-face "labels, Points, progress"
+```
+
+## Move a card to another board
+
+```bash
+laneboard new "Next release"
+```
+
+```bash
+laneboard labels "Next release" --add docs
+```
+
+```bash
+laneboard transfer "Software release" REL-3 "Next release" --column Ready
+```
+
+```text
+Moved REL-3 to Next release as T-1, in Ready.
+Not carried over: Points: 3, Priority: High.
+```
+
+The card gets a key from the board it moves to. Its label comes with it because the other board has
+one with the same name; the other board has no Points or Priority, so those stay behind, and the
+message says so. Its notes, sections and tasks always come with it.
+
 ## Use it from a script
 
 `--json` gives you the data, and the exit code says whether it worked:
@@ -95,7 +192,7 @@ Card keys, notes, ticks and archived cards all come across. Importing always add
 changes one you have. If anything in the file is wrong, nothing is added, and the message says what:
 
 ```text
-laneboard: Group name is too long (73 characters; the limit is 60).
+laneboard: Board "Software release": Group name is too long (73 characters; the limit is 60).
 ```
 
 ## Write a board by hand

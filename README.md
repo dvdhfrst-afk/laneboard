@@ -124,7 +124,8 @@ Next to your file:
 - `boards.json.bak` is the version before the last save.
 - `boards.json.backups/` holds one copy per day you made changes, and a copy taken before a board
   is deleted or a backup is restored. The newest 30 are kept.
-- `boards.json.v1.bak` is your file as it was before Laneboard upgraded its format, if that happened.
+- `boards.json.v2.bak` is your file as it was before Laneboard upgraded its format, if that happened
+  (the number is the old format's).
 
 To go back:
 
@@ -152,12 +153,25 @@ Every command takes `--help`. A board can be named by its name or id.
 | `laneboard add BOARD TITLE` | Add a card and print its key. `--column`, `--group`, `--summary` |
 | `laneboard move BOARD KEY COLUMN` | Move a card to the bottom of a column |
 | `laneboard archive BOARD KEY` | Archive a card. `--restore` brings it back |
+| `laneboard show BOARD KEY` | Everything on one card. `--json` |
+| `laneboard edit BOARD KEY` | Change a card. `--title`, `--summary`, `--group`, `--column`, `--label`, `--unlabel`, `--set PROPERTY=VALUE`, `--clear PROPERTY`, `--blocked`, `--notes` or `--notes-file` |
+| `laneboard delete BOARD KEY --yes` | Delete a card for good |
+| `laneboard task BOARD KEY` | List a card's tasks. `--add TEXT`, `--done N`, `--reopen N`, `--remove N`, counting from 1 |
+| `laneboard transfer BOARD KEY TARGET_BOARD` | Move a card to another board. `--column` |
+| `laneboard new NAME` | Make a board. `--description` |
+| `laneboard labels BOARD` | List labels. `--add NAME` (with `--color`), `--rename OLD=NEW`, `--remove NAME` |
+| `laneboard properties BOARD` | List properties. `--add NAME --type TYPE` (with `--choices`, `--min`, `--max`, `--decimals`, `--unit`), `--rename OLD=NEW`, `--remove NAME` |
+| `laneboard views BOARD` | List saved views. `--add NAME --query Q` (with `--sort`), `--remove NAME`, `--default NAME` or `none` |
+| `laneboard settings BOARD` | Show a board's settings. `--name`, `--description`, `--prefix`, `--limit-policy warn` or `refuse`, `--card-face A,B,C` |
 | `laneboard import FILE` | Add boards from a file, or `-` for standard input. All or nothing |
 | `laneboard export BOARD` | Write a board as JSON. `-o FILE`, `--force`, or `--all` for every board |
 | `laneboard sample [NAME]` | List the example boards, or add one |
 | `laneboard backups` | List the copies you can go back to |
 | `laneboard restore NAME` | Go back to one |
 | `laneboard check` | Check that the file can be read, without changing it |
+
+`--label`, `--unlabel`, `--set`, `--clear` and the `task` options can be given more than once. A value
+that starts with `-`, like a sort, goes after an `=`: `--sort=-points`.
 
 Commands can run while the board is running. The page picks up what they do.
 
