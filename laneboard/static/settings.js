@@ -2,10 +2,13 @@
 
 import { COLORS, activeCards, setBoard, sheet, state } from "./state.js";
 import { countBy, pairsText, parsePairs, plural } from "./util.js";
-import { $, closeSheet, confirmBox, field, h, sheetHead, showSheet, toast } from "./dom.js";
+import { $, closeSheet, confirmBox, field, h, sheetHead, showSheet, tabs, toast } from "./dom.js";
 import { api, loadBoards, send } from "./api.js";
 import { goToBoard, route } from "./nav.js";
 import { chooseImportFile } from "./transfer.js";
+import { faceTab, labelsTab, propertiesTab } from "./boardparts.js";
+
+const POLICIES = [["warn", "Flag the column, and still take cards"], ["refuse", "Take no more cards until one leaves"]];
 
 function upper(input) {
   input.autocapitalize = "characters";
@@ -133,6 +136,12 @@ export function openSettings() {
   };
   b.checklists.forEach((cl) => addList(cl));
 
+  const policy = h("fieldset", { class: "policy" }, h("legend", { class: "lbl", text: "When a column is at its limit" }),
+    POLICIES.map(([value, text]) => h("label", {}, h("input", { type: "radio", name: "limit-policy", value, checked: b.settings.limitPolicy === value }), text)));
+  const labels = labelsTab(b, dirty);
+  const props = propertiesTab(b, dirty);
+  const face = faceTab(b, props, dirty);
+
   const error = h("div", { class: "form-error", role: "alert" });
   const submit = h("button", { type: "submit", class: "primary", text: "Save" });
   const actions = h("div", { class: "form-actions" }, submit,
@@ -180,9 +189,23 @@ export function openSettings() {
       error.textContent = err.message;
       return;
     }
+    Object.assign(changes, labels.changes(), props.changes());
+    const settings = {};
+    const limitPolicy = $('input[name="limit-policy"]:checked', policy).value;
+    if (limitPolicy !== b.settings.limitPolicy) settings.limitPolicy = limitPolicy;
+    // A property added just now has no id yet, so a card face showing it goes once the property is saved.
+    const shown = face.face();
+    const later = shown.face.some((part) => typeof part !== "string");
+    if (shown.changed && !later) settings.cardFace = shown.face;
+    if (Object.keys(settings).length) changes.settings = settings;
     submit.disabled = true;
     try {
-      await send("PATCH", "", changes);
+      const data = await send("PATCH", "", changes);
+      if (shown.changed && later) {
+        const idOf = (part) => (typeof part === "string" ? part
+          : data.board.properties.find((p) => p.name.toLowerCase() === part.name.trim().toLowerCase())?.id);
+        await send("PATCH", "", { settings: { cardFace: shown.face.map(idOf).filter(Boolean) } });
+      }
       sheet.dirty = false;
       closeSheet(true);
       toast("Board settings saved.");
@@ -193,7 +216,7 @@ export function openSettings() {
     }
   };
 
-  const form = h("form", { class: "form", novalidate: true, oninput: dirty, onsubmit },
+  const general = h("div", { class: "form" },
     field("Board name", name),
     field("Description", desc, "Shows under the board name."),
     h("div", { class: "row2" },
@@ -201,16 +224,24 @@ export function openSettings() {
       field("Group label", groupLabel, "What a group is on this board: Repo, Client, Project.")),
     field("New card sections", template, "One name per line. Every new card starts with these sections; any left empty aren't saved."),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Columns" }),
-      h("span", { class: "hint", text: "Top to bottom here is left to right on the board. A limit flags the column when it holds more cards than that." }),
+      h("span", { class: "hint", text: "Top to bottom here is left to right on the board. A limit is how many cards a column should hold." }),
       cols, h("div", {}, h("button", { type: "button", text: "Add column", onclick: () => { $(".c-name", addCol()).focus(); dirty(); } }))),
+    policy,
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Groups" }),
       h("span", { class: "hint", text: "Each group gets a color and its own card keys, like VM-1." }),
       groups, h("div", {}, h("button", { type: "button", text: "Add group", onclick: () => { $(".g-name", addGroup()).focus(); dirty(); } }))),
     h("div", { class: "field" }, h("span", { class: "lbl", text: "Checklists" }),
       h("span", { class: "hint", text: "One line per item. Start a line with # to make it a heading. Every card ticks its own copy, and a line you reword starts unticked." }),
-      lists, h("div", {}, h("button", { type: "button", text: "Add checklist", onclick: () => { $(".k-name", addList()).focus(); dirty(); } }))),
-    error, actions);
-  showSheet("settings", null, h("div", { class: "form" }, sheetHead("Board settings"), form));
+      lists, h("div", {}, h("button", { type: "button", text: "Add checklist", onclick: () => { $(".k-name", addList()).focus(); dirty(); } }))));
+  const parts = tabs([
+    { id: "general", label: "General", panel: general },
+    { id: "labels", label: "Labels", panel: labels.panel },
+    { id: "properties", label: "Properties", panel: props.panel },
+    { id: "face", label: "Card face", panel: face.panel },
+  ], { onSelect: (id) => { if (id === "face") face.refresh(); } });
+  const form = h("form", { class: "form", novalidate: true, oninput: dirty, onchange: dirty, onsubmit },
+    general, labels.panel, props.panel, face.panel, error, actions);
+  showSheet("settings", null, h("div", { class: "form" }, sheetHead("Board settings"), parts.bar, form));
 }
 
 export function openNewBoard() {

@@ -1361,5 +1361,187 @@ class MoveToBoard(PartsCase):
         page.wait_for_selector("#toast:has-text('Moved T-1 to Other')")
 
 
+class BoardSettingsParts(PartsCase):
+    def test_labels_tab_add_rename_recolor_remove_with_a_count(self):
+        b = parts_board()
+        b["cards"][0]["labels"] = ["Bug", "Docs"]
+        b["cards"][1]["labels"] = ["Bug"]
+        page = self.start(b)
+        self.settings(page, "labels")
+        rows = page.locator(".label-row")
+        rows.nth(1).locator(".l-name").fill("Documentation")
+        rows.nth(2).locator(".l-color").select_option("violet")
+        page.click("text=Add label")
+        page.keyboard.type("Later")
+        rows.nth(0).locator("text=Remove").click()
+        page.wait_for_selector(".confirm:has-text('Bug is on 2 cards')")
+        page.click(".confirm button.danger")
+        self.save_settings(page)
+        labels = self.app.board()["labels"]
+        self.assertEqual([(lab["id"], lab["name"]) for lab in labels], [("docs", "Documentation"), ("quick", "Quick"), ("later", "Later")])
+        self.assertEqual([lab["color"] for lab in labels[:2]], ["blue", "violet"])
+        self.assertEqual(self.app.card("T-1")["labels"], ["docs"])
+        self.assertEqual(self.app.card("T-2")["labels"], [])
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').all_inner_texts(), ["Documentation"])
+
+    def test_properties_tab(self):
+        b = parts_board()
+        b["cards"][0]["properties"] = {"Points": 3, "Link": "https://example.test/"}
+        page = self.start(b)
+        self.settings(page, "properties")
+        defs = page.locator(".prop-def")
+        defs.nth(0).locator(".p-name").fill("Story points")
+        defs.nth(1).locator(".choice-row >> nth=2").locator("button[aria-label='Move choice up']").click()
+        defs.nth(1).locator(".choice-row >> nth=0").locator(".ch-name").fill("Lowest")
+        defs.nth(6).locator("text=Remove").click()  # Owner: no card has a value, so no question
+        defs.nth(4).locator("text=Remove").click()  # Link: one card has a value
+        page.wait_for_selector(".confirm:has-text('Link has a value on 1 card')")
+        page.click(".confirm button.danger")
+        page.click("text=Add property")
+        new = page.locator(".prop-def").last
+        new.locator(".p-name").fill("Size")
+        new.locator(".p-type").select_option("choice")
+        new.locator(".ch-name").fill("S")
+        new.locator("text=Add choice").click()
+        page.keyboard.type("M")
+        page.click("text=Add property")
+        rated = page.locator(".prop-def").last
+        rated.locator(".p-name").fill("Effort")
+        rated.locator(".p-type").select_option("rating")
+        rated.locator(".r-max").select_option("7")
+        self.save_settings(page)
+        props = {p["name"]: p for p in self.app.board()["properties"]}
+        self.assertEqual(list(props), ["Story points", "Priority", "Platform", "Reviewed", "Confidence", "Size", "Effort"])
+        self.assertEqual(props["Story points"]["id"], "points")
+        self.assertEqual([c["name"] for c in props["Priority"]["choices"]], ["Lowest", "High", "Medium"])
+        self.assertEqual([c["name"] for c in props["Size"]["choices"]], ["S", "M"])
+        self.assertEqual(props["Effort"]["max"], 7)
+        self.assertEqual(self.app.card("T-1")["properties"], {"points": 3})
+        # A change the board can't make: the server's reason shows, and the form stays as it was.
+        self.settings(page, "properties")
+        page.locator(".prop-def >> nth=0").locator(".p-type").select_option("checkbox")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector(".form-error:has-text(\"can't change from number to checkbox\")")
+        self.assertEqual(page.locator(".prop-def >> nth=0").locator(".p-type").input_value(), "checkbox")
+        self.assertEqual(self.app.board()["properties"][0]["type"], "number")
+
+    def test_card_face_tab(self):
+        b = parts_board()
+        b["cards"][0].update(labels=["Bug"], properties={"Priority": "High"})
+        page = self.start(b)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').count(), 1)
+        self.settings(page, "face")
+        rows = page.locator(".face-row")
+        rows.filter(has_text="Labels").locator("input").uncheck()
+        priority = rows.filter(has_text="Priority")
+        priority.locator("input").check()
+        for _ in range(8):
+            priority.locator("button[aria-label='Move it up']").click()
+        self.save_settings(page)
+        face = self.app.board()["settings"]["cardFace"]
+        self.assertEqual(face[0], "priority")
+        self.assertNotIn("labels", face)
+        self.assertEqual(page.locator('.card[data-key="T-1"] .chip.label').count(), 0)
+        self.assertTrue(page.locator('.card[data-key="T-1"] .meta > :first-child').inner_text().startswith("Priority"))
+        # A property added in the same save can be put on the card face straight away.
+        self.settings(page, "properties")
+        page.click("text=Add property")
+        page.locator(".prop-def").last.locator(".p-name").fill("Team")
+        page.click("#tab-face")
+        page.locator(".face-row").filter(has_text="Team").locator("input").check()
+        self.save_settings(page)
+        self.wait_until(lambda: "team" in self.app.board()["settings"]["cardFace"], "the new property on the card face")
+
+    def test_a_full_column_refuses_where_the_card_was_going(self):
+        b = parts_board()
+        b["cards"][1]["column"] = "Doing"
+        page = self.start(b)
+        self.settings(page)
+        page.check("input[name='limit-policy'][value='refuse']")
+        self.save_settings(page)
+        self.assertEqual(self.app.board()["settings"]["limitPolicy"], "refuse")
+        page.drag_and_drop('.card[data-key="T-1"]', '[data-col="doing"]')
+        page.wait_for_selector('[data-col="doing"] .col-note:has-text("Doing is full")')
+        self.assertEqual(self.column_keys(page, "backlog"), ["T-1", "T-3"], "the card goes back")
+        self.assertEqual(self.app.card("T-1")["column"], "backlog")
+        self.open_card(page, "T-1")
+        page.select_option("#card-column", "doing")
+        page.wait_for_selector("#sheet .form-error:has-text('Doing is full')")
+        self.until(page, "document.querySelector('#card-column').value === 'backlog'")
+        self.close_sheet(page)
+        page.click('[data-col="doing"] button[aria-label="Add a card to Doing"]')
+        page.fill("dialog[open] input", "Keep this title")
+        page.click("dialog[open] button[type=submit]")
+        page.wait_for_selector(".form-error:has-text('Doing is full')")
+        self.assertEqual(page.input_value("dialog[open] input"), "Keep this title")
+
+
+class PartsHostile(PartsCase):
+    def test_names_and_values_stay_text(self):
+        b = parts_board()
+        b["labels"] = [{"name": SHORT, "color": "rose"}, "Plain"]
+        b["properties"] = [
+            {"name": SHORT, "type": "choice", "choices": [SHORT, "Other"]},
+            {"name": "Note", "type": "text"},
+            {"name": "Link", "type": "url"},
+            {"name": "Count", "type": "number", "unit": SHORT[:10]},
+        ]
+        b["settings"] = {"cardFace": ["labels", SHORT, "Note", "Link", "Count"]}
+        b["cards"][0].update(labels=[SHORT], tasks=[HOSTILE], properties={
+            SHORT: SHORT, "Note": HOSTILE, "Link": 'https://x.test/"><script>window.pwned=1</script>', "Count": 2})
+        page = self.start(b, sample_board("Second"))
+        self.assertIn(SHORT, page.locator('.card[data-key="T-1"] .meta').inner_text())
+        page.click("#filters .label-filter >> nth=0")
+        self.open_card(page, "T-1")
+        page.click("#card-labels")
+        page.click("#sheet >> text=Move to board")
+        self.assertEqual(page.input_value("#prop-note"), HOSTILE)
+        page.click("#sheet >> text=Edit")
+        page.wait_for_selector("dialog[open] form")
+        page.click("text=Cancel")
+        self.close_sheet(page)
+        self.settings(page)
+        for tab in ("labels", "properties", "face"):
+            page.click(f"#tab-{tab}")
+        page.wait_for_timeout(300)
+        self.assertIsNone(page.evaluate("window.pwned || null"))
+        self.assertEqual(page.locator("#board img, #sheet img, #board script, #sheet script, #filters img").count(), 0)
+        self.assertEqual(page.locator('a[href^="javascript"]').count(), 0)
+
+
+class PartsSizes(PartsCase):
+    def sheet_overflow(self, page):
+        return page.evaluate("document.querySelector('#sheet').scrollWidth - document.querySelector('#sheet').clientWidth")
+
+    def test_narrow_screens(self):
+        long = "Unbroken" * 30
+        b = parts_board()
+        b["labels"].append({"name": long[:40], "color": "teal"})
+        b["properties"].append({"name": long[:40], "type": "multi", "choices": [long[:40], "Short"]})
+        b["cards"][0].update(labels=["Bug", long[:40]], tasks=[long[:300], "Short"],
+                             properties={"Owner": long[:500], "Link": "https://example.test/" + long[:400], "Points": 12.5, long[:40]: long[:40]})
+        b["settings"] = {"cardFace": ["labels", "Owner", "Link", "Points", long[:40], "progress"]}
+        page = self.start(b, sample_board("Other"))
+        for width, height in [(390, 844), (320, 568)]:
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(50)
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0, f"board at {width} px")
+            self.open_card(page, "T-1")
+            page.click("#card-labels")
+            page.click("#sheet >> text=Move to board")
+            self.until(page, "!document.querySelector('#move-column').disabled")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"card at {width} px")
+            page.click("#sheet >> text=Edit")
+            page.click("#form-labels")
+            self.assertLessEqual(self.sheet_overflow(page), 0, f"form at {width} px")
+            page.click("text=Cancel")
+            self.close_sheet(page)
+            self.settings(page)
+            for tab in ("general", "labels", "properties", "face"):
+                page.click(f"#tab-{tab}")
+                self.assertLessEqual(self.sheet_overflow(page), 0, f"settings {tab} at {width} px")
+            self.close_sheet(page)
+
+
 if __name__ == "__main__":
     unittest.main()
