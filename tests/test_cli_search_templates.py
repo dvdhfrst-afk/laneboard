@@ -111,6 +111,7 @@ class Templates(Case):
         self.assertEqual(self.lines("templates")[-2:], [
             "our-setup            Our setup (5 columns, no starter cards, saved). How we work",
             "with-cards           With cards (5 columns, 5 starter cards, saved)."])
+        self.assertRegex(self.lines("new", "Bare", "--template", "our-setup")[0], r"from the template Our setup, with no cards\.$")
         self.unchanged("templates", "save", "Work", "our SETUP", says="There's already a template called Our setup.")
         self.unchanged("templates", "delete", "Our setup", code=2, says="add --yes to delete it")
         self.unchanged("templates", "delete", "Basic", "--yes", says="Basic is a built-in template")

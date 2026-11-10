@@ -1,5 +1,6 @@
 """Keep the docs honest: versions agree, documented commands run, and the text follows the house rules."""
 
+import json
 import os
 import re
 import shlex
@@ -95,6 +96,16 @@ class ExamplesRun(unittest.TestCase):
             card = found['laneboard show "Software release" REL-3'].strip().splitlines()
             self.assertEqual(card[:len(shown[6].splitlines())], shown[6].splitlines())
             self.assertEqual(found['laneboard transfer "Software release" REL-3 "Next release" --column Ready'].strip(), shown[7])
+            self.assertEqual(found['laneboard search "upgrade OR session"'].strip(), shown[8])
+            self.assertEqual(found['laneboard cards "Software release" --query "group:web OR is:blocked" --sort title'].strip(),
+                             shown[9])
+            self.assertEqual(found["laneboard templates"].strip(), shown[11])
+            self.assertEqual(found['laneboard templates save "Software release" "Release board" --description '
+                                   '"Components, a release checklist and new card sections."'].strip(), shown[12])
+            self.assertEqual(found['laneboard views "Next quarter"'].strip(), shown[13])
+            failed = subprocess.run([sys.executable, "-m", "laneboard", "search", "label:dcos"], cwd=tmp, env=env,
+                                    capture_output=True, text=True, encoding="utf-8", timeout=60)
+            self.assertEqual((failed.returncode, failed.stdout, failed.stderr.strip()), (1, "", shown[10]))
 
     def test_readme_commands_that_do_not_start_a_server(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,18 +120,30 @@ class ExamplesRun(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "LANEBOARD_DATA": os.path.join(tmp, "try.json"), "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
             with open(os.path.join(tmp, "moving.json"), "w", encoding="utf-8") as f:
-                f.write(blocks("docs/file-format.md", ("json",))[1])
+                f.write(blocks("docs/file-format.md", ("json",))[2])
             self.assertIn("Moving house", self.run_line("laneboard import moving.json", tmp, env))
 
     def test_the_full_import_in_the_format_doc_imports_as_described(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "LANEBOARD_DATA": os.path.join(tmp, "try.json"), "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
             with open(os.path.join(tmp, "garden.json"), "w", encoding="utf-8") as f:
-                f.write(blocks("docs/file-format.md", ("json",))[2])
+                f.write(blocks("docs/file-format.md", ("json",))[3])
             self.assertIn("Garden", self.run_line("laneboard import garden.json", tmp, env))
             shown = self.run_line("laneboard show Garden G-1", tmp, env)
             for line in ("Labels: Outside, Seeds", "Hours: 1.5 h", "Season: Spring", "  1. [ ] Soak the seeds", "  2. [x] Dig the bed"):
                 self.assertIn(line, shown.splitlines())
+
+    def test_the_saved_template_in_the_format_doc_makes_a_board_as_described(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "try.json")
+            env = {**os.environ, "LANEBOARD_DATA": path, "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8"}
+            template = json.loads(blocks("docs/file-format.md", ("json",))[1])
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"version": 3, "boards": [], "templates": [template]}, f)
+            self.assertTrue(self.run_line("laneboard check", tmp, env).strip().endswith("OK"))
+            self.assertIn("with 2 cards", self.run_line('laneboard new "" --template "weekly chores"', tmp, env))
+            self.assertEqual(self.run_line('laneboard cards "Weekly chores" --view "Quick jobs"', tmp, env).split()[:3],
+                             ["C-1", "To", "do"])
 
 
 @unittest.skipUnless(shutil.which("git"), "git is not installed")

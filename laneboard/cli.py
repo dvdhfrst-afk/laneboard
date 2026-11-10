@@ -473,7 +473,8 @@ def cmd_new(args):
         print(f"Added {board['name']} as {board['id']}.")
         return
     template = get_template(store.saved_templates(), args.template)
-    print(f"Added {board['name']} as {board['id']}, from the template {template['name']}, with {count(len(board['cards']), 'card')}.")
+    cards = count(len(board["cards"]), "card") if board["cards"] else "no cards"
+    print(f"Added {board['name']} as {board['id']}, from the template {template['name']}, with {cards}.")
 
 
 def template_line(t):
