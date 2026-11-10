@@ -1,0 +1,131 @@
+{
+ "id": "6a1f00000000000000000001",
+ "name": "Kitchen refit",
+ "desc": "A made-up board for testing imports: planning a small kitchen refit.",
+ "closed": false,
+ "idOrganization": "6a1f000000000000000000ff",
+ "url": "https://trello.example/b/AbCd1234/kitchen-refit",
+ "shortLink": "AbCd1234",
+ "prefs": {"permissionLevel": "private", "background": "green", "cardCovers": true},
+ "labelNames": {"green": "Quick", "yellow": "Waiting", "red": "Urgent", "purple": "Design", "sky": "Shopping"},
+ "labels": [
+  {"id": "6a1f000000000000000000a1", "idBoard": "6a1f00000000000000000001", "name": "Quick", "color": "green"},
+  {"id": "6a1f000000000000000000a2", "idBoard": "6a1f00000000000000000001", "name": "Waiting", "color": "yellow"},
+  {"id": "6a1f000000000000000000a3", "idBoard": "6a1f00000000000000000001", "name": "Urgent", "color": "red"},
+  {"id": "6a1f000000000000000000a4", "idBoard": "6a1f00000000000000000001", "name": "Design", "color": "purple"},
+  {"id": "6a1f000000000000000000a5", "idBoard": "6a1f00000000000000000001", "name": "Shopping", "color": "sky"},
+  {"id": "6a1f000000000000000000a6", "idBoard": "6a1f00000000000000000001", "name": "", "color": "orange"},
+  {"id": "6a1f000000000000000000a7", "idBoard": "6a1f00000000000000000001", "name": "Electrics", "color": "blue_dark"}
+ ],
+ "lists": [
+  {"id": "6a1f000000000000000000b1", "name": "Ideas", "closed": false, "pos": 16384, "idBoard": "6a1f00000000000000000001"},
+  {"id": "6a1f000000000000000000b2", "name": "To do", "closed": false, "pos": 32768, "idBoard": "6a1f00000000000000000001"},
+  {"id": "6a1f000000000000000000b5", "name": "Old plans", "closed": true, "pos": 40000, "idBoard": "6a1f00000000000000000001"},
+  {"id": "6a1f000000000000000000b4", "name": "Done", "closed": false, "pos": 65536, "idBoard": "6a1f00000000000000000001"},
+  {"id": "6a1f000000000000000000b3", "name": "Doing", "closed": false, "pos": 49152, "idBoard": "6a1f00000000000000000001"}
+ ],
+ "customFields": [
+  {"id": "6a1f000000000000000000c1", "idModel": "6a1f00000000000000000001", "modelType": "board", "name": "Supplier",
+   "type": "text", "pos": 16384, "display": {"cardFront": true}},
+  {"id": "6a1f000000000000000000c2", "idModel": "6a1f00000000000000000001", "modelType": "board", "name": "Cost",
+   "type": "number", "pos": 32768, "display": {"cardFront": true}},
+  {"id": "6a1f000000000000000000c3", "idModel": "6a1f00000000000000000001", "modelType": "board", "name": "Ordered",
+   "type": "checkbox", "pos": 49152, "display": {"cardFront": false}},
+  {"id": "6a1f000000000000000000c4", "idModel": "6a1f00000000000000000001", "modelType": "board", "name": "Room",
+   "type": "list", "pos": 65536, "display": {"cardFront": true},
+   "options": [
+    {"id": "6a1f000000000000000000d1", "idCustomField": "6a1f000000000000000000c4", "value": {"text": "Kitchen"}, "color": "green", "pos": 16384},
+    {"id": "6a1f000000000000000000d2", "idCustomField": "6a1f000000000000000000c4", "value": {"text": "Hall, upstairs"}, "color": "blue", "pos": 32768},
+    {"id": "6a1f000000000000000000d3", "idCustomField": "6a1f000000000000000000c4", "value": {"text": "Garage"}, "color": "none", "pos": 49152}
+   ]},
+  {"id": "6a1f000000000000000000c5", "idModel": "6a1f00000000000000000001", "modelType": "board", "name": "Delivery",
+   "type": "date", "pos": 81920, "display": {"cardFront": false}}
+ ],
+ "members": [
+  {"id": "6a1f000000000000000000e1", "fullName": "Example Person", "username": "exampleperson"}
+ ],
+ "cards": [
+  {"id": "6a1f000000000000000000f1", "idShort": 1, "name": "Measure the wall for the new shelves", "desc": "Both alcoves.\n\nWrite the numbers in the notes.",
+   "closed": false, "idList": "6a1f000000000000000000b2", "pos": 16384, "idLabels": ["6a1f000000000000000000a1"],
+   "idMembers": [], "idChecklists": [], "due": null, "dueComplete": false, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0},
+   "customFieldItems": [
+    {"id": "6a1f0000000000000000f101", "idCustomField": "6a1f000000000000000000c4", "idModel": "6a1f000000000000000000f1", "modelType": "card", "idValue": "6a1f000000000000000000d1"}
+   ]},
+  {"id": "6a1f000000000000000000f2", "idShort": 2, "name": "Order the worktop", "desc": "",
+   "closed": false, "idList": "6a1f000000000000000000b3", "pos": 16384,
+   "idLabels": ["6a1f000000000000000000a3", "6a1f000000000000000000a5"],
+   "idMembers": ["6a1f000000000000000000e1"], "idChecklists": ["6a1f00000000000000000091"],
+   "due": "2026-12-01T12:00:00.000Z", "dueComplete": false, "attachments": [], "stickers": [],
+   "badges": {"votes": 2, "attachments": 0, "comments": 1},
+   "customFieldItems": [
+    {"id": "6a1f0000000000000000f201", "idCustomField": "6a1f000000000000000000c1", "idModel": "6a1f000000000000000000f2", "modelType": "card", "value": {"text": "Example Timber Yard"}},
+    {"id": "6a1f0000000000000000f202", "idCustomField": "6a1f000000000000000000c2", "idModel": "6a1f000000000000000000f2", "modelType": "card", "value": {"number": "420.5"}},
+    {"id": "6a1f0000000000000000f203", "idCustomField": "6a1f000000000000000000c3", "idModel": "6a1f000000000000000000f2", "modelType": "card", "value": {"checked": "true"}},
+    {"id": "6a1f0000000000000000f204", "idCustomField": "6a1f000000000000000000c5", "idModel": "6a1f000000000000000000f2", "modelType": "card", "value": {"date": "2026-12-03T09:00:00.000Z"}}
+   ]},
+  {"id": "6a1f000000000000000000f3", "idShort": 3, "name": "Pick a tile colour", "desc": "Samples are in the drawer.",
+   "closed": false, "idList": "6a1f000000000000000000b1", "pos": 32768,
+   "idLabels": ["6a1f000000000000000000a4", "6a1f000000000000000000a6"],
+   "idMembers": [], "idChecklists": ["6a1f00000000000000000092", "6a1f00000000000000000093"], "due": null,
+   "attachments": [{"id": "6a1f0000000000000000aa01", "name": "tiles.jpg", "url": "https://trello.example/attachments/tiles.jpg"}],
+   "stickers": [{"id": "6a1f0000000000000000ab01", "image": "star"}],
+   "badges": {"votes": 0, "attachments": 1, "comments": 0},
+   "customFieldItems": [
+    {"id": "6a1f0000000000000000f301", "idCustomField": "6a1f000000000000000000c4", "idModel": "6a1f000000000000000000f3", "modelType": "card", "idValue": "6a1f000000000000000000d2"},
+    {"id": "6a1f0000000000000000f302", "idCustomField": "6a1f000000000000000000c2", "idModel": "6a1f000000000000000000f3", "modelType": "card", "value": {"number": "35"}}
+   ]},
+  {"id": "6a1f000000000000000000f4", "idShort": 4, "name": "Book the electrician", "desc": "Two new sockets by the window.",
+   "closed": false, "idList": "6a1f000000000000000000b2", "pos": 8192,
+   "idLabels": ["6a1f000000000000000000a7", "6a1f000000000000000000a2"],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0},
+   "customFieldItems": [
+    {"id": "6a1f0000000000000000f401", "idCustomField": "6a1f000000000000000000c3", "idModel": "6a1f000000000000000000f4", "modelType": "card", "value": {"checked": "false"}}
+   ]},
+  {"id": "6a1f000000000000000000f5", "idShort": 5, "name": "Take the old cupboards to the tip", "desc": "",
+   "closed": false, "idList": "6a1f000000000000000000b4", "pos": 16384, "idLabels": [],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0}, "customFieldItems": []},
+  {"id": "6a1f000000000000000000f6", "idShort": 6, "name": "Paint the ceiling", "desc": "Done before the units go in.",
+   "closed": false, "idList": "6a1f000000000000000000b4", "pos": 32768, "idLabels": ["6a1f000000000000000000a1"],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0},
+   "customFieldItems": [
+    {"id": "6a1f0000000000000000f601", "idCustomField": "6a1f000000000000000000c2", "idModel": "6a1f000000000000000000f6", "modelType": "card", "value": {"number": "64.25"}}
+   ]},
+  {"id": "6a1f000000000000000000f7", "idShort": 7, "name": "Look at second hand ovens", "desc": "Decided on a new one instead.",
+   "closed": true, "idList": "6a1f000000000000000000b1", "pos": 65536, "idLabels": ["6a1f000000000000000000a5"],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0}, "customFieldItems": []},
+  {"id": "6a1f000000000000000000f8", "idShort": 8, "name": "Move the sink to the window", "desc": "Too much plumbing. Kept for the record.",
+   "closed": false, "idList": "6a1f000000000000000000b5", "pos": 16384, "idLabels": [],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "badges": {"votes": 0, "attachments": 0, "comments": 0}, "customFieldItems": []},
+  {"id": "6a1f000000000000000000f9", "idShort": 9, "name": "Choose the cupboard handles", "desc": "",
+   "closed": false, "idList": "6a1f000000000000000000b1", "pos": 16384, "idLabels": ["6a1f000000000000000000a4"],
+   "idMembers": [], "idChecklists": [], "due": null, "attachments": [], "stickers": [],
+   "idMembersVoted": ["6a1f000000000000000000e1"],
+   "badges": {"votes": 1, "attachments": 0, "comments": 0}, "customFieldItems": []}
+ ],
+ "checklists": [
+  {"id": "6a1f00000000000000000091", "name": "Before ordering", "idCard": "6a1f000000000000000000f2", "pos": 16384,
+   "checkItems": [
+    {"id": "6a1f00000000000000009101", "name": "Check the length again", "state": "complete", "pos": 16384},
+    {"id": "6a1f00000000000000009102", "name": "Ask about the edge finish", "state": "incomplete", "pos": 32768}
+   ]},
+  {"id": "6a1f00000000000000000092", "name": "Samples", "idCard": "6a1f000000000000000000f3", "pos": 16384,
+   "checkItems": [
+    {"id": "6a1f00000000000000009201", "name": "White gloss", "state": "complete", "pos": 16384},
+    {"id": "6a1f00000000000000009202", "name": "Sage green", "state": "incomplete", "pos": 32768}
+   ]},
+  {"id": "6a1f00000000000000000093", "name": "Grout", "idCard": "6a1f000000000000000000f3", "pos": 32768,
+   "checkItems": [
+    {"id": "6a1f00000000000000009301", "name": "Grey or white", "state": "incomplete", "pos": 16384}
+   ]}
+ ],
+ "actions": [
+  {"id": "6a1f0000000000000000ac01", "type": "commentCard", "data": {"text": "The yard said two weeks.", "card": {"id": "6a1f000000000000000000f2"}}},
+  {"id": "6a1f0000000000000000ac02", "type": "updateCard", "data": {"card": {"id": "6a1f000000000000000000f5"}}}
+ ]
+}

@@ -25,7 +25,7 @@ classifiers = [
 laneboard = "laneboard.cli:main"
 
 [tool.setuptools]
-packages = ["laneboard", "laneboard.samples", "laneboard.static"]
+packages = ["laneboard", "laneboard.formats", "laneboard.samples", "laneboard.static"]
 
 [tool.setuptools.dynamic]
 version = { attr = "laneboard.__version__" }
