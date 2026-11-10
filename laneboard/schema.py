@@ -193,13 +193,36 @@ def decode_text(raw: bytes, where: str) -> str:
         raise BadFile(f"{where} isn't UTF-8 text ({e.reason} at byte {e.start}).") from e
 
 
+# A boards file nests about 8 deep and the exports Laneboard reads not much more. How deep Python's own JSON reader
+# can go before it gives up depends on the system (much deeper on Linux than on Windows), so the limit is set here.
+MAX_NESTING = 64
+
+
+def nested_too_deeply(value) -> bool:
+    """Whether parsed JSON goes more than MAX_NESTING lists and objects deep. Walks without recursing."""
+    if not isinstance(value, (dict, list)):
+        return False
+    stack = [(value, 1)]
+    while stack:
+        item, depth = stack.pop()
+        if depth > MAX_NESTING:
+            return True
+        for child in (item.values() if isinstance(item, dict) else item):
+            if isinstance(child, (dict, list)):
+                stack.append((child, depth + 1))
+    return False
+
+
 def parse_json(raw: bytes, where: str):
     """Parse JSON bytes from a file. Handles the BOMs that Notepad and PowerShell add."""
     content = decode_text(raw, where)
     if not content.strip():
         raise BadFile(f"{where} is empty.")
     try:
-        return json.loads(content, parse_constant=_refuse_constant)
+        value = json.loads(content, parse_constant=_refuse_constant)
+        if nested_too_deeply(value):
+            raise RecursionError
+        return value
     except RecursionError as e:
         raise BadFile(f"{where} is nested too deeply to be a board file.") from e
     except json.JSONDecodeError as e:

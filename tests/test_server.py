@@ -141,6 +141,9 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         status, _, _ = self.request("POST", "/api/boards", raw=b"[1]", headers={"Content-Type": "application/json"})
         self.assertEqual(status, 400)
+        deep = b'{"name": "Deep", "x": ' + b"[" * 100 + b"]" * 100 + b"}"  # the same limit on every system
+        status, data, _ = self.request("POST", "/api/boards", raw=deep, headers={"Content-Type": "application/json"})
+        self.assertEqual((status, data["error"]), (400, "The request body isn't valid JSON."))
 
     def test_large_bodies_are_refused(self):
         status, _, _ = self.request("POST", "/api/boards", raw=b"x" * (MAX_BODY + 1), headers={"Content-Type": "application/json"})

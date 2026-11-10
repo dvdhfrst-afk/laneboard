@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 from urllib.parse import parse_qs, quote, urlsplit
 
-from . import __version__, formats, samples, stats, storage
+from . import __version__, formats, samples, schema, stats, storage
 from .query import QueryError, run, search_boards
 from .schema import MAX_IMPORT_BYTES, SCHEMA_VERSION, slug
 from .store import Store, StoreError, describe_backups, outline
@@ -209,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             data = self.rfile.read(length)
             self._body_read = True
             body = json.loads(data.decode("utf-8-sig"), parse_constant=self._no_constant)
+            if schema.nested_too_deeply(body):
+                raise RecursionError
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise HttpError(400, "The request body isn't valid JSON.")
         if not isinstance(body, dict):

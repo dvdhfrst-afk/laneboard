@@ -338,6 +338,19 @@ class Limits(unittest.TestCase):
         self.assertEqual(error(self, markdown.import_, md),
                          "The Board settings part of that file is nested too deeply to be a board file.")
 
+    def test_the_nesting_limit_is_the_same_on_every_system(self):
+        # Python's own reader gives up at a depth that depends on the system, so the limit is checked separately.
+        from laneboard.schema import MAX_NESTING
+        for depth, refused in ((MAX_NESTING, False), (MAX_NESTING + 1, True), (5000, True)):
+            raw = b"[" * depth + b"]" * depth
+            with self.subTest(depth=depth):
+                self.assertEqual(formats.common.Sample(raw).is_json, not refused)
+                if refused:
+                    self.assertEqual(error(self, native.import_, raw), "That file is nested too deeply to be a board file.")
+        md = b"# B\n\n## Board settings\n\n```json\n" + b'{"a":' * 100 + b"1" + b"}" * 100 + b"\n```\n"
+        self.assertEqual(error(self, markdown.import_, md),
+                         "The Board settings part of that file is nested too deeply to be a board file.")
+
     def test_numbers_json_does_not_allow(self):
         self.assertIn("NaN isn't allowed", error(self, native.import_, b'{"name": "x", "rank": NaN}'))
 

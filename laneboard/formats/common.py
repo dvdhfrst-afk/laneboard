@@ -129,7 +129,9 @@ class Sample:
             text = self.text
             if text is not None and text.lstrip()[:1] in ("{", "["):
                 try:
-                    self._json = json.loads(text, parse_constant=_refuse)
+                    value = json.loads(text, parse_constant=_refuse)
+                    if not schema.nested_too_deeply(value):
+                        self._json = value
                 except (ValueError, RecursionError):
                     pass
         return self._json
