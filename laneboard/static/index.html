@@ -31,9 +31,23 @@
   <div class="welcome" id="welcome" hidden></div>
 
   <div class="tools" id="tools" hidden>
-    <label class="sr" for="search">Search cards</label>
-    <input type="search" id="search" placeholder="Search cards (press / )" autocomplete="off">
-    <span class="search-count" id="search-count"></span>
+    <div class="find">
+      <label class="sr" for="search">Search cards</label>
+      <input type="search" id="search" placeholder="Search cards (press / )" autocomplete="off" spellcheck="false" maxlength="500" aria-describedby="search-error">
+      <details class="menu views" id="views">
+        <summary id="views-summary">Views</summary>
+        <div class="menu-items" id="view-items"></div>
+      </details>
+      <div class="sort">
+        <label for="sort-by">Sort</label>
+        <select id="sort-by"></select>
+        <button type="button" id="sort-dir" hidden></button>
+      </div>
+      <span class="search-count" id="search-count"></span>
+      <button type="button" class="link" id="search-all" hidden>Search every board</button>
+    </div>
+    <div class="search-error" id="search-error" aria-live="polite" hidden></div>
+    <p class="sort-hint" id="sort-hint" hidden></p>
     <div class="filters" id="filters" role="group" aria-label="Filter cards"></div>
   </div>
 

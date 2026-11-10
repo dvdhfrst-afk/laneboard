@@ -13,6 +13,7 @@ import { labelsView } from "./labels.js";
 import { propertiesView } from "./properties.js";
 import { tasksView } from "./tasks.js";
 import { movePanel, otherBoards } from "./moveboard.js";
+import { sortActive } from "./search.js";
 
 const NOTES_DELAY = 900;
 
@@ -189,8 +190,10 @@ function cardView(card, notes, status, parts, flush) {
       ? h("ul", {}, lines.map((l) => h("li", {}, rich(l.trim().replace(/^[-*•]\s+/, "")))))
       : h("p", {}, rich(text)));
   };
-  const nudge = (label, delta) => h("button", { type: "button", class: "icon", "aria-label": label, title: label, text: delta < 0 ? "↑" : "↓",
-    disabled: !!card.archived, onclick: () => { if (shiftCard(card.key, delta)) announce(`${card.key} moved ${delta < 0 ? "up" : "down"}.`); } });
+  const sorted = sortActive();
+  const nudge = (label, delta) => h("button", { type: "button", class: "icon", "aria-label": label, text: delta < 0 ? "↑" : "↓",
+    title: sorted ? `${label}: off while the board is sorted. Choose Manual order under Sort to move cards by hand.` : label,
+    disabled: !!card.archived || sorted, onclick: () => { if (shiftCard(card.key, delta)) announce(`${card.key} moved ${delta < 0 ? "up" : "down"}.`); } });
   const showError = (e) => { said.textContent = e.message; };
   const frag = document.createDocumentFragment();
   frag.append(...[

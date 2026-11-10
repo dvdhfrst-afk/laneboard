@@ -5,8 +5,9 @@ import { APP_VERSION, cardBy, drafts, setBoard, sheet, state } from "./state.js"
 import { $, announce, bindSheet, closeSheet, toast } from "./dom.js";
 import { api, checkVersion, loadBoards, pending } from "./api.js";
 import { renderPicker, showBoard } from "./board.js";
-import { bindMenu, closeMenu, renderMenu } from "./menu.js";
+import { bindMenu, closeMenu, openMenu, renderMenu } from "./menu.js";
 import { bindSearch } from "./search.js";
+import { bindSort } from "./views.js";
 import { bindDrag, shiftCard, shiftColumn } from "./move.js";
 import { openCardForm } from "./cardform.js";
 import { openNewBoard, openSettings } from "./settings.js";
@@ -81,9 +82,10 @@ function focusNeighbour(el, key) {
 function bindKeyboard() {
   const search = $("#search");
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && $("#menu").open) {
+    const menu = openMenu();
+    if (e.key === "Escape" && menu) {
       closeMenu();
-      $("#menu summary").focus();
+      menu.querySelector("summary").focus();
       return;
     }
     if ($("#sheet").open || e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.("input, textarea, select")) return;
@@ -94,6 +96,13 @@ function bindKeyboard() {
       e.preventDefault();
       search.focus();
       search.select();
+    } else if (e.key === "v" && state.board) {
+      e.preventDefault();
+      $("#views").open = true;
+      $("#view-items button")?.focus();
+    } else if (e.key === "s" && state.board) {
+      e.preventDefault();
+      $("#sort-by").focus();
     } else if (e.key === "n" && state.board) {
       e.preventDefault();
       openCardForm(null, { column: cardBy(e.target.closest?.(".card")?.dataset.key)?.column });
@@ -128,10 +137,11 @@ function bindKeyboard() {
 function bindPage() {
   $("#new-card").addEventListener("click", () => openCardForm(null));
   $("#board-settings").addEventListener("click", openSettings);
-  $("#new-board").addEventListener("click", openNewBoard);
+  $("#new-board").addEventListener("click", () => openNewBoard());
   $("#board-pick").addEventListener("change", (e) => { if (e.target.value) location.hash = e.target.value; });
   bindImport();
   bindSearch();
+  bindSort();
   bindMenu();
   window.addEventListener("hashchange", route);
   window.addEventListener("focus", refresh);

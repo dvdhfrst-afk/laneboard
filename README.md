@@ -11,7 +11,8 @@ shared over a network. If several people need the same board, use something else
 - Cards with a summary, fields, sections, working notes and a "blocked by" line
 - Checklists that every card ticks through on its own, with progress shown on each card
 - Drag cards between columns, or move them with the keyboard or the buttons on a card
-- Search, filter by group or blocked cards, collapse columns, flag a column that holds too many cards
+- Search with a small search language, sort the columns, and keep searches as saved views
+- Collapse columns, and flag a column that holds too many cards
 - Archive cards to get them out of the way without losing them; duplicate cards and boards
 - Import and export from the page or the command line, and a command line for scripts
 - Changes save as you make them. Edits made in two tabs don't silently overwrite each other
@@ -97,7 +98,7 @@ time to see the keyboard shortcuts and where your data is.
 - Removing a column that holds cards asks which column they should move to.
 - **Labels** are colored tags a card can have several of, like Bug or Waiting. In an open card,
   **Add labels** opens a picker: type to find a label, or type a new name and press Enter to make
-  it. The label buttons above the board show only the cards with any of the labels you pick.
+  it. The label buttons above the board find the cards with any of the labels you pick.
 - **Properties** are values every card can hold: text, a number with a unit, one choice or several,
   a checkbox, a link, or a star rating. Set them up under **Properties** in Board settings, then
   fill them in on the open card, where each one saves as soon as you enter it. If someone changed
@@ -113,6 +114,20 @@ time to see the keyboard shortcuts and where your data is.
 - **Move to board** in an open card moves it to another board and column. Its group, labels,
   property values and ticks come along where the other board has ones with the same names, and a
   message lists anything that didn't, with a button to go to the card.
+- The **search box** takes words or the whole search language (see [Search](#search)). The group,
+  label and **Blocked** buttons under it write their part into the search, like `label:Bug` or
+  `is:blocked`, and take it out again; picking two labels or two groups finds cards with either. If
+  the board can't read a search, a message under the box says why and marks the spot, and the board
+  keeps showing the last search that worked.
+- **Search every board** (or Shift+Enter in the search box) runs the same search on every board and
+  lists what it finds. Pick a card to open it on its board, with the search still in the box.
+- **Sort** orders the cards in each column by title, key, created, updated, progress, group or any
+  property, either way round. **Manual order**, the default, is the order you put cards in. While the
+  board is sorted, you can drag a card to another column but not up or down within one.
+- **Views** keeps the search and the sort under a name: **Save view**, then pick it from **Views**
+  any time. When the search or sort has moved on, **Views** offers to update the view. **Manage
+  views** renames, changes and removes views, and picks the one the board opens with. The address
+  always holds the search and sort, so a reload or a bookmark opens the board the same way.
 - Collapsing a column is remembered in that browser. It isn't saved in your boards file.
 
 Columns show the first 300 cards with a button for more, so a very long column stays quick.
@@ -123,12 +138,22 @@ Columns show the first 300 cards with a button for more, so a very long column s
 |---|---|
 | `n` | New card |
 | `/` | Search |
+| `s` | Sort |
+| `v` | Saved views |
 | `?` | Shortcuts and where your data is |
 | Arrow keys | Go from card to card (Tab reaches the board, then arrows take over) |
 | Enter | Open the card |
-| Shift + Up or Down | Move the card within its column |
+| Shift + Up or Down | Move the card within its column (in manual order) |
 | Shift + Left or Right | Move the card to the next column |
 | Esc | Close what's open, or clear the search |
+
+In the search box:
+
+| Key | Does |
+|---|---|
+| Enter | Search now |
+| Shift + Enter | Search every board |
+| Esc | Clear the search |
 
 In an open card:
 
@@ -170,7 +195,8 @@ doesn't have says so and lists what it does have.
 To change the order of the cards in each column, add a sort: `sort:title`, `sort:-points` (a minus
 sorts the other way), or several, like `sort:-priority,title`. You can sort by `title`, `key`,
 `created`, `updated`, `group`, `progress`, `rank` (the order on the board, which is the default) or
-any property. Cards with no value go last either way.
+any property. Cards with no value go last either way. In the page, **Sort** by the search box does
+the same.
 
 The command line takes the same searches, and a saved view keeps one under a name:
 

@@ -1,10 +1,12 @@
-// Moving cards: drag and drop, the move buttons and Shift+arrow keys, and saving the new place.
+// Moving cards: drag and drop, the move buttons and Shift+arrow keys, and saving the new place. While the board is
+// sorted by anything but its own order, the sort decides where a card shows in its column, so cards can still go to
+// another column (to its bottom, by hand) but not up or down.
 
 import { cardBy, cardsIn, state } from "./state.js";
 import { $, announce, h, toast } from "./dom.js";
 import { send } from "./api.js";
-import { render, renderColumns } from "./board.js";
-import { matches, queryWords } from "./search.js";
+import { isDrawn, render, renderColumns } from "./board.js";
+import { sortActive, sortedNote } from "./search.js";
 
 const NOTE_FOR = 8000;  // how long a column says why it didn't take a card
 let noteTimer = null;
@@ -30,7 +32,7 @@ export function bindDrag() {
     return n;
   };
   const clear = (except) => {
-    for (const col of main.querySelectorAll(".drop-target")) if (col !== except) col.classList.remove("drop-target");
+    for (const col of main.querySelectorAll(".drop-target, .no-reorder")) if (col !== except) col.classList.remove("drop-target", "no-reorder");
   };
   const end = () => {
     state.drag = null;
@@ -55,6 +57,16 @@ export function bindDrag() {
       line.remove();
       return;
     }
+    if (sortActive()) {  // the sort places the card: no line, and its own column takes no drop
+      line.remove();
+      if (col.dataset.col === cardBy(state.drag)?.column) {
+        col.classList.add("no-reorder");
+        return;
+      }
+      e.preventDefault();
+      col.classList.add("drop-target");
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     col.classList.add("drop-target");
@@ -72,7 +84,7 @@ export function bindDrag() {
   });
   main.addEventListener("drop", (e) => {
     const col = e.target.closest(".col");
-    if (!state.drag || !col) return;
+    if (!state.drag || !col || (sortActive() && col.dataset.col === cardBy(state.drag)?.column)) return;
     e.preventDefault();
     const key = state.drag;
     const prev = line.parentNode ? nextCard(line, "previousElementSibling") : null;
@@ -107,12 +119,16 @@ export function setColumn(key, column, refused) {
   moveCard(key, column, null, null, refused);
 }
 
-// Move up or down among the cards showing, as the buttons on a card and Shift+arrow keys do.
+// Move up or down among the cards showing, as the buttons on a card and Shift+arrow keys do. On a sorted board this
+// says why it can't.
 export function shiftCard(key, delta) {
   const card = cardBy(key);
-  if (!card) return false;
-  const words = queryWords();
-  const visible = cardsIn(card.column).filter((c) => c.key === key || matches(c, words));
+  if (!card || card.archived) return false;
+  if (sortActive()) {
+    sortedNote();
+    return false;
+  }
+  const visible = cardsIn(card.column).filter((c) => c.key === key || isDrawn(c.key));
   const at = visible.indexOf(card);
   const target = visible[at + delta];
   if (!target) return false;
@@ -123,6 +139,7 @@ export function shiftCard(key, delta) {
 
 export function shiftColumn(key, delta) {
   const card = cardBy(key);
+  if (card?.archived) return false;
   const columns = state.board.columns;
   const at = columns.findIndex((c) => c.id === card?.column);
   const target = columns[at + delta];

@@ -1,4 +1,4 @@
-// The More menu in the header.
+// The More menu in the header, and closing whichever menu is open (More, or Views by the search box).
 
 import { index, state } from "./state.js";
 import { $, h } from "./dom.js";
@@ -22,13 +22,16 @@ export function renderMenu() {
     item("Keyboard shortcuts and help", openHelp));
 }
 
+export const openMenu = () => document.querySelector("details.menu[open]");
+
 export function closeMenu() {
-  $("#menu").removeAttribute("open");
+  for (const menu of document.querySelectorAll("details.menu[open]")) menu.removeAttribute("open");
 }
 
-// A click anywhere else closes the menu.
+// A click anywhere else closes an open menu, and opening one closes the other.
 export function bindMenu() {
   document.addEventListener("click", (e) => {
-    if ($("#menu").open && !e.target.closest?.("#menu")) closeMenu();
+    const inside = e.target.closest?.("details.menu");
+    for (const menu of document.querySelectorAll("details.menu[open]")) if (menu !== inside) menu.removeAttribute("open");
   });
 }
